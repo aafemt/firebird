@@ -62,17 +62,26 @@ namespace
 		{
 			p = 0;
 		}
-		p = file.find('.', p);
-		if (p == PathName::npos)
+#ifdef WIN_NT
+		// On Windows extension is everything after the last dot of file name:
+		// library.name.dll
+		PathName::size_type dotPos = file.rfind('.');
+		if (dotPos == PathName::npos || dotPos < p)
+#else
+		// Anywhere else it is everything after the first dot of file name:
+		// libname.so.1.2.3
+		PathName::size_type dotPos = file.find('.', p);
+		if (dotPos == PathName::npos)
+#endif
 		{
-			file += '.';
+			file.appendString('.');
 		}
 		else
 		{
-			file.erase(p + 1);
+			file.erase(dotPos + 1);
 		}
 
-		file += newExt;
+		file.appendString(newExt);
 	}
 
 	// Holds a reference to plugins.conf file
@@ -95,7 +104,7 @@ namespace
 	};
 	InitInstance<StaticConfHolder> pluginsConf;
 
-	RefPtr<ConfigFile> findInPluginsConf(const char* param, const char* pluginName)
+	RefPtr<ConfigFile> findInPluginsConf(const char* param, const ConfigFile::String& pluginName)
 	{
 		ConfigFile* f = pluginsConf().get();
 		if (f)
@@ -275,7 +284,7 @@ namespace
 			const ConfigFile::Parameter* p = pluginLoaderConfig->findParameter("Config");
 			if (p)
 			{
-				RefPtr<ConfigFile> configSection(findInPluginsConf("Config", p->value.c_str()));
+				RefPtr<ConfigFile> configSection(findInPluginsConf("Config", p->value));
 				if (configSection.hasData())
 				{
 					IConfig* rc = FB_NEW ConfigAccess(configSection);
@@ -458,7 +467,7 @@ namespace
 				const ConfigFile::Parameter* p = pluginLoaderConfig->findParameter("ConfigFile");
 				if (p && p->value.hasData())
 				{
-					confName = p->value.ToPathName();
+					confName = p->value;
 				}
 			}
 			if (module != builtin)
@@ -753,13 +762,13 @@ namespace
 				const ConfigFile::Parameter* v = conf->findParameter("RegisterName");
 				if (v)
 				{
-					regName = v->value.ToPathName();
+					regName = v->value;
 				}
 
 				v = conf->findParameter("Module");
 				if (v)
 				{
-					curModule = v->value.ToPathName();
+					curModule = v->value;
 				}
 
 				v = conf->findParameter("Required");
