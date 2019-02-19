@@ -4427,6 +4427,8 @@ static ULONG get_rel_flags_from_FLAGS(USHORT flags)
 	if (flags & REL_sql) {
 		ret |= REL_sql_relation;
 	}
+	if (flags & REL_no_replication)
+		ret |= REL_repl_disabled;
 
 	return ret;
 }

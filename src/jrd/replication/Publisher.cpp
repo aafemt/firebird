@@ -386,7 +386,7 @@ void REPL_store(thread_db* tdbb, const record_param* rpb, jrd_tra* transaction)
 	const auto relation = rpb->rpb_relation;
 	fb_assert(relation);
 
-	if (relation->isTemporary())
+	if (relation->isTemporary() || (relation->rel_flags & REL_repl_disabled))
 		return;
 
 	const auto matcher = attachment->att_repl_matcher.get();
@@ -457,7 +457,7 @@ void REPL_modify(thread_db* tdbb, const record_param* orgRpb,
 	const auto relation = newRpb->rpb_relation;
 	fb_assert(relation);
 
-	if (relation->isTemporary())
+	if (relation->isTemporary() || (relation->rel_flags & REL_repl_disabled))
 		return;
 
 	const auto matcher = attachment->att_repl_matcher.get();
@@ -543,7 +543,7 @@ void REPL_erase(thread_db* tdbb, const record_param* rpb, jrd_tra* transaction)
 	const auto relation = rpb->rpb_relation;
 	fb_assert(relation);
 
-	if (relation->isTemporary())
+	if (relation->isTemporary() || (relation->rel_flags & REL_repl_disabled))
 		return;
 
 	const auto matcher = attachment->att_repl_matcher.get();

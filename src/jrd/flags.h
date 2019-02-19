@@ -42,6 +42,7 @@ const USHORT FILE_backing_up	= 64;
 // flags for RDB$RELATIONS
 
 const USHORT REL_sql			= 0x0001;
+const USHORT REL_no_replication	= 0x0002;
 
 // flags for RDB$TRIGGERS
 

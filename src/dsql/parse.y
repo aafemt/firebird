@@ -634,6 +634,7 @@ using namespace Firebird;
 %token <metaNamePtr> RDB_GET_TRANSACTION_CN
 %token <metaNamePtr> RDB_ROLE_IN_USE
 %token <metaNamePtr> RDB_SYSTEM_PRIVILEGE
+%token <metaNamePtr> REPLICATION
 %token <metaNamePtr> RESET
 %token <metaNamePtr> RSA_DECRYPT
 %token <metaNamePtr> RSA_ENCRYPT
@@ -650,6 +651,8 @@ using namespace Firebird;
 %token <metaNamePtr> TIES
 %token <metaNamePtr> TIMEZONE_HOUR
 %token <metaNamePtr> TIMEZONE_MINUTE
+%token <metaNamePtr> DISABLE
+%token <metaNamePtr> ENABLE
 %token <metaNamePtr> TOTALORDER
 %token <metaNamePtr> TRAPS
 %token <metaNamePtr> UNBOUNDED
@@ -2168,11 +2171,31 @@ table_clause
 			{
 				$<createRelationNode>$ = newNode<CreateRelationNode>($1, $2);
 			}
-		'(' table_elements($3) ')' sql_security_clause
+		'(' table_elements($3) ')' table_attributes($3)
 			{
 				$$ = $3;
-				$$->ssDefiner = $7;
 			}
+	;
+
+%type table_attributes(<relationNode>)
+table_attributes($relationNode)
+	: /* nothing */
+	| table_attribute($relationNode)
+	| table_attributes ',' table_attribute($relationNode)
+	;
+
+%type table_attribute(<relationNode>)
+table_attribute($relationNode)
+	: repl_attribute
+		{ setClause($relationNode->replicated, "REPLICATION MODE", $1); }
+	| sql_security_clause
+		{ setClause($relationNode->ssDefiner, "SQL SECURITY", $1); }
+	;
+
+%type <boolVal> repl_attribute
+repl_attribute
+	: ENABLE REPLICATION	{ $$ = true; }
+	| DISABLE REPLICATION	{ $$ = false; }
 	;
 
 %type <createRelationNode> gtt_table_clause
@@ -2200,7 +2223,7 @@ gtt_ops($createRelationNode)
 gtt_op($createRelationNode)
 	: // nothing by default. Will be set "on commit delete rows" in dsqlPass
 	| sql_security_clause
-		{ setClause(static_cast<BaseNullable<bool>&>($createRelationNode->ssDefiner), "SQL SECURITY", $1); }
+		{ setClause($createRelationNode->ssDefiner, "SQL SECURITY", $1); }
 	| ON COMMIT DELETE ROWS
 		{ setClause($createRelationNode->relationType, "ON COMMIT DELETE ROWS", rel_global_temp_delete); }
 	| ON COMMIT PRESERVE ROWS
@@ -2605,7 +2628,7 @@ procedure_clause
 
 %type <createAlterProcedureNode> psql_procedure_clause
 psql_procedure_clause
-	: procedure_clause_start sql_security_clause AS local_declarations_opt full_proc_block
+	: procedure_clause_start sql_security_clause_opt AS local_declarations_opt full_proc_block
 		{
 			$$ = $1;
 			$$->ssDefiner = $2;
@@ -2634,11 +2657,19 @@ procedure_clause_start
 			{ $$ = $2; }
 	;
 
-%type <nullableBoolVal> sql_security_clause
-sql_security_clause
+%type <nullableBoolVal> sql_security_clause_opt
+sql_security_clause_opt
 	: /* nothing */				{ $$ = Nullable<bool>::empty(); }
-	| SQL SECURITY DEFINER		{ $$ = Nullable<bool>::val(true); }
-	| SQL SECURITY INVOKER		{ $$ = Nullable<bool>::val(false); }
+	| sql_security_clause
+		{
+			$$ = Nullable<bool>::val($1);
+		}
+	;
+
+%type <boolVal> sql_security_clause
+sql_security_clause
+	: SQL SECURITY DEFINER		{ $$ = true; }
+	| SQL SECURITY INVOKER		{ $$ = false; }
 	;
 
 %type <createAlterProcedureNode> alter_procedure_clause
@@ -2736,7 +2767,7 @@ function_clause
 
 %type <createAlterFunctionNode> psql_function_clause
 psql_function_clause
-	: function_clause_start sql_security_clause AS local_declarations_opt full_proc_block
+	: function_clause_start sql_security_clause_opt AS local_declarations_opt full_proc_block
 		{
 			$$ = $1;
 			$$->ssDefiner = $2;
@@ -2822,7 +2853,7 @@ replace_function_clause
 
 %type <createAlterPackageNode> package_clause
 package_clause
-	: symbol_package_name sql_security_clause AS BEGIN package_items_opt END
+	: symbol_package_name sql_security_clause_opt AS BEGIN package_items_opt END
 		{
 			CreateAlterPackageNode* node = newNode<CreateAlterPackageNode>(*$1);
 			node->ssDefiner = $2;
@@ -4092,22 +4123,30 @@ alter_op($relationNode)
 		}
 	| ALTER SQL SECURITY DEFINER
 		{
-			RelationNode::AlterSqlSecurityClause* clause =
-				newNode<RelationNode::AlterSqlSecurityClause>();
-			clause->ssDefiner = Nullable<bool>::val(true);
+			setClause($relationNode->ssDefiner, "SQL SECURITY", true);
+			RelationNode::Clause* clause =
+				newNode<RelationNode::Clause>(RelationNode::Clause::TYPE_ALTER_SQL_SECURITY);
 			$relationNode->clauses.add(clause);
 		}
 	| ALTER SQL SECURITY INVOKER
 		{
-			RelationNode::AlterSqlSecurityClause* clause =
-				newNode<RelationNode::AlterSqlSecurityClause>();
-			clause->ssDefiner = Nullable<bool>::val(false);
+			setClause($relationNode->ssDefiner, "SQL SECURITY", false);
+			RelationNode::Clause* clause =
+				newNode<RelationNode::Clause>(RelationNode::Clause::TYPE_ALTER_SQL_SECURITY);
 			$relationNode->clauses.add(clause);
 		}
 	| DROP SQL SECURITY
 		{
-			RelationNode::AlterSqlSecurityClause* clause =
-				newNode<RelationNode::AlterSqlSecurityClause>();
+			$relationNode->ssDefiner.specified = false;
+			RelationNode::Clause* clause =
+				newNode<RelationNode::Clause>(RelationNode::Clause::TYPE_ALTER_SQL_SECURITY);
+			$relationNode->clauses.add(clause);
+		}
+	| repl_attribute
+		{
+			setClause($relationNode->replicated, "REPLICATION MODE", $1);
+			RelationNode::Clause* clause =
+				newNode<RelationNode::Clause>(RelationNode::Clause::TYPE_ALTER_REPLICATION);
 			$relationNode->clauses.add(clause);
 		}
 	;
@@ -8805,6 +8844,7 @@ non_reserved_word
 	| PRIVILEGE
 	| QUANTIZE
 	| RANGE
+	| REPLICATION
 	| RESET
 	| RSA_DECRYPT
 	| RSA_ENCRYPT
@@ -8819,6 +8859,8 @@ non_reserved_word
 	| SQL
 	| SYSTEM
 	| TIES
+	| DISABLE
+	| ENABLE
 	| TOTALORDER
 	| TRAPS
 	| ZONE

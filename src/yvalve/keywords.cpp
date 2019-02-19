@@ -185,6 +185,7 @@ static const TOK tokens[] =
 	{TOK_DESCRIPTOR,	"DESCRIPTOR", true},
 	{TOK_DETERMINISTIC, "DETERMINISTIC", false},
 	{TOK_DIFFERENCE, "DIFFERENCE", true},
+	{TOK_DISABLE, "DISABLE", true},
 	{TOK_DISCONNECT, "DISCONNECT", false},
 	{TOK_DISTINCT, "DISTINCT", false},
 	{TOK_DO, "DO", true},
@@ -192,6 +193,7 @@ static const TOK tokens[] =
 	{TOK_DOUBLE, "DOUBLE", false},
 	{TOK_DROP, "DROP", false},
 	{TOK_ELSE, "ELSE", false},
+	{TOK_ENABLE, "ENABLE", true},
 	{TOK_ENCRYPT, "ENCRYPT", true},
 	{TOK_END, "END", false},
 	{TOK_ENGINE, "ENGINE", true},
@@ -393,6 +395,7 @@ static const TOK tokens[] =
 	{TOK_RELATIVE, "RELATIVE", true},
 	{TOK_RELEASE, "RELEASE", false},
 	{TOK_REPLACE, "REPLACE", true},
+	{TOK_REPLICATION, "REPLICATION", true},
 	{TOK_REQUESTS, "REQUESTS", true},
 	{TOK_RESERVING, "RESERV", true},	// Alias of RESERVING
 	{TOK_RESERVING, "RESERVING", true},

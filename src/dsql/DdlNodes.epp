@@ -7437,6 +7437,11 @@ void CreateRelationNode::execute(thread_db* tdbb, DsqlCompilerScratch* dsqlScrat
 		else
 			REL.RDB$SQL_SECURITY.NULL = TRUE;
 
+		if (replicated.specified && !replicated.value)
+		{
+			REL.RDB$FLAGS |= REL_no_replication;
+		}
+
 		REL.RDB$VIEW_BLR.NULL = TRUE;
 		REL.RDB$VIEW_SOURCE.NULL = TRUE;
 		REL.RDB$EXTERNAL_FILE.NULL = TRUE;
@@ -7580,6 +7585,11 @@ void AlterRelationNode::execute(thread_db* tdbb, DsqlCompilerScratch* dsqlScratc
 			name, NULL);
 
 		ObjectsArray<CreateDropConstraint> constraints;
+
+		static const int SQL_SECURITY = 0x01;
+		static const int REPLICATION = 0x02;
+
+		int changedAttributes = 0;
 
 		for (NestConst<Clause>* i = clauses.begin(); i != clauses.end(); ++i)
 		{
@@ -7776,29 +7786,13 @@ void AlterRelationNode::execute(thread_db* tdbb, DsqlCompilerScratch* dsqlScratc
 
 				case Clause::TYPE_ALTER_SQL_SECURITY:
 				{
-					AutoRequest request;
+					changedAttributes |= SQL_SECURITY;
+					break;
+				}
 
-					FOR(REQUEST_HANDLE request TRANSACTION_HANDLE transaction)
-						REL IN RDB$RELATIONS
-						WITH REL.RDB$RELATION_NAME EQ name.c_str()
-					{
-						MODIFY REL
-						{
-							const Nullable<bool> ssDefiner =
-								static_cast<const AlterSqlSecurityClause*>(i->getObject())->ssDefiner;
-
-							if (ssDefiner.specified)
-							{
-								REL.RDB$SQL_SECURITY.NULL = FALSE;
-								REL.RDB$SQL_SECURITY = ssDefiner.value ? FB_TRUE : FB_FALSE;
-							}
-							else
-								REL.RDB$SQL_SECURITY.NULL = TRUE;
-						}
-						END_MODIFY
-					}
-					END_FOR
-
+				case Clause::TYPE_ALTER_REPLICATION:
+				{
+					changedAttributes |= REPLICATION;
 					break;
 				}
 
@@ -7806,6 +7800,40 @@ void AlterRelationNode::execute(thread_db* tdbb, DsqlCompilerScratch* dsqlScratc
 					fb_assert(false);
 					break;
 			}
+		}
+
+		if (changedAttributes != 0)
+		{
+			AutoRequest relRequest;
+
+			FOR(REQUEST_HANDLE relRequest TRANSACTION_HANDLE transaction)
+				REL IN RDB$RELATIONS
+				WITH REL.RDB$RELATION_NAME EQ name.c_str()
+			{
+				MODIFY REL
+				{
+					if (changedAttributes & SQL_SECURITY)
+					{
+						if (ssDefiner.specified)
+						{
+							REL.RDB$SQL_SECURITY.NULL = FALSE;
+							REL.RDB$SQL_SECURITY = ssDefiner.value ? FB_TRUE : FB_FALSE;
+						}
+						else
+							REL.RDB$SQL_SECURITY.NULL = TRUE;
+					}
+
+					if (changedAttributes && REPLICATION)
+					{
+						if (replicated.value)
+							REL.RDB$FLAGS &= ~REL_no_replication;
+						else
+							REL.RDB$FLAGS |= REL_no_replication;
+					}
+				}
+				END_MODIFY
+			}
+			END_FOR
 		}
 
 		for (ObjectsArray<CreateDropConstraint>::iterator constraint(constraints.begin());

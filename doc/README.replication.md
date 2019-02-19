@@ -32,6 +32,11 @@ Replication is configured using a single configuration file: replication.conf. I
 
 Tables to be replicated can be customized using two settings: include\_filter and exclude\_filter. They are regular expressions that are applied to table names and define rules for inclusion table\(s\) into the replication set or excluding them from the replication set.
 
+Replication of single tables can be also disabled by SQL adding clause ENABLE|DISABLE REPLICATION to CREATE or ALTER TABLE queries:
+
+CREATE TABLE <table definition> (<fields definition>) [ENABLE|DISABLE REPLICATION]
+ALTER TABLE <other alter table options> [ENABLE|DISABLE REPLICATION]
+
 Synchronous replication can be turned on using the sync\_replica setting \(multiple entries are allowed\). It must specify a connection string to the replica database, prefixed with username/password. In SuperServer and SuperClassic architectures, replica database is being internally attached when the first user gets connected to the master database and detached when the last user disconnects from the master database. In Classic Server architecture, every server process keeps an active connection to the replica database.
 
 Asynchronous replication requires setting up the journalling mechanism.The primary parameter is log\_directory which defines location of the replication journal. Once this location is specified, asynchronous replication is turned on and Firebird server starts producing the journal segments.
