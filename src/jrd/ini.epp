@@ -29,7 +29,7 @@
 #include "../jrd/val.h"
 #include "../jrd/ods.h"
 #include "../jrd/btr.h"
-#include "gen/ids.h"
+#include "../jrd/ids.h"
 #include "../jrd/intl.h"
 #include "../jrd/tra.h"
 #include "../jrd/trig.h"

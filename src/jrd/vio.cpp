@@ -48,7 +48,7 @@
 #include "../jrd/val.h"
 #include "../jrd/req.h"
 #include "../jrd/tra.h"
-#include "gen/ids.h"
+#include "../jrd/ids.h"
 #include "../jrd/lck.h"
 #include "../jrd/lls.h"
 #include "../jrd/scl.h"

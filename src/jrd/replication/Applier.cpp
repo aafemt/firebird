@@ -21,7 +21,7 @@
  */
 
 #include "firebird.h"
-#include "ids.h"
+#include "../ids.h"
 #include "../jrd/align.h"
 #include "../jrd/jrd.h"
 #include "../jrd/blb.h"

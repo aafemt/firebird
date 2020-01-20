@@ -226,7 +226,7 @@ $(TOMCRYPT_LIB):	$(TOM_Objs)
 # main build target for both debug and release builds
 #
 
-.PHONY:	cross1 cross2 boot yvalve engine fbintl gpre utilities plugins rest codes ids examples cross_rest
+.PHONY:	cross1 cross2 boot yvalve engine fbintl gpre utilities plugins rest codes examples cross_rest
 
 master_process:
 	ln -sf $(SRC_ROOT)/include/gen/autoconfig.auto $(SRC_ROOT)/include/gen/autoconfig.h
@@ -236,10 +236,6 @@ master_process:
 	$(MAKE) updateCloopInterfaces
 	$(MAKE) boot
 	$(MAKE) yvalve
-ifeq ($(IsDeveloper), Y)
-# In developer mode we must regenerate various files in include/gen
-	$(MAKE) ids
-endif
 	$(MAKE) engine
 	$(MAKE) fbintl
 	$(MAKE) utilities
@@ -271,10 +267,6 @@ cross1:
 	$(MAKE) updateCloopInterfaces
 	$(MAKE) boot
 	$(MAKE) yvalve
-ifeq ($(IsDeveloper), Y)
-# In developer mode we must regenerate various files in include/gen
-	$(MAKE) ids
-endif
 	$(MAKE) engine
 	$(MAKE) fbintl
 	$(MAKE) gbak isql gfix
@@ -590,21 +582,14 @@ $(COMPAT_SQL):	$(SRC_COMPAT_SQL)
 
 .PHONY: gen_codes
 CODES = $(BIN)/codes$(EXEC_EXT)
-IDS = $(SRC_ROOT)/include/gen/ids.h
 
 codes:	gen_codes
-
-ids:	$(IDS)
 
 gen_codes:	$(CODES) msg.timestamp
 	$(CODES) $(SRC_ROOT)/include/gen $(LNG_ROOT)
 
 $(CODES):	$(CODES_Objects) $(COMMON_LIB)
 	$(EXE_LINK) $(EXE_LINK_OPTIONS) $^ -o $@ $(FIREBIRD_LIBRARY_LINK) $(LINK_LIBS) $(call LINK_DARWIN_RPATH,..)
-
-$(IDS):		$(SRC_ROOT)/misc/ids.m $(SRC_ROOT)/jrd/relations.h
-	m4 $< > $@
-
 
 #___________________________________________________________________________
 # all the rest we need to build

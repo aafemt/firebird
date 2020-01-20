@@ -4411,11 +4411,6 @@
 			path = ids.h;
 			refType = 4;
 		};
-		F616C6050200B0CF01EF0ADE = {
-			isa = PBXFileReference;
-			path = ids.m;
-			refType = 4;
-		};
 		F616C6060200B0CF01EF0ADE = {
 			isa = PBXFileReference;
 			path = idx.cpp;

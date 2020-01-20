@@ -30,7 +30,7 @@
 #include "../common/security.h"
 #include "../jrd/met_proto.h"
 #include "../jrd/ini.h"
-#include "gen/ids.h"
+#include "../jrd/ids.h"
 
 using namespace Jrd;
 using namespace Firebird;

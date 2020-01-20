@@ -25,7 +25,7 @@
 #include "../jrd/Record.h"
 #include "../jrd/ini.h"
 #include "../jrd/tra.h"
-#include "gen/ids.h"
+#include "../jrd/ids.h"
 
 using namespace Jrd;
 using namespace Firebird;

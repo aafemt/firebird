@@ -46,7 +46,7 @@
 #include "../jrd/tra.h"
 #include "../jrd/ini.h"
 #include "../jrd/status.h"
-#include "gen/ids.h"
+#include "../jrd/ids.h"
 
 #ifdef WIN_NT
 #include <process.h>
