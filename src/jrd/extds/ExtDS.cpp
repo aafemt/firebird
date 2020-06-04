@@ -641,7 +641,7 @@ void Connection::releaseStatement(Jrd::thread_db* tdbb, Statement* stmt)
 {
 	fb_assert(stmt && !stmt->isActive());
 
-	if (stmt->isAllocated() && m_free_stmts < MAX_CACHED_STMTS)
+	if (stmt->isAllocated() && testFeature(fb_feature_statement_long_life) && m_free_stmts < MAX_CACHED_STMTS)
 	{
 		stmt->m_nextFree = m_freeStatements;
 		m_freeStatements = stmt;

@@ -182,6 +182,7 @@ enum info_provider_features // response to fb_info_provider_features
 	fb_feature_session_reset		= 3,	// ALTER SESSION RESET is supported
 	fb_feature_read_consistency		= 4,	// Read consistency TIL is supported
 	fb_feature_statement_timeout	= 5,	// Statement timeout is supported
+	fb_feature_statement_long_life  = 6,    // Prepared statement can survive transaction end
 
 	info_provider_features_max      // Not really a feature. Keep this last.
 };

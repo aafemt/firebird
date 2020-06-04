@@ -193,6 +193,7 @@ void IscConnection::attach(thread_db* tdbb)
                             // this info item. Assume Firebird 3 or earlier.
                             m_features[fb_feature_multi_statements] = true;
                             m_features[fb_feature_multi_transactions] = true;
+                            m_features[fb_feature_statement_long_life] = true;
                         }
                         break;
                     }
