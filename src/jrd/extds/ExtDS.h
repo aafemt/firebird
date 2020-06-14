@@ -197,7 +197,7 @@ protected:
 };
 
 // Provider flags
-const int prvTrustedAuth	= 0x0008;	// supports trusted authentication
+const int prvTrustedAuth	= 0x0001;	// supports trusted authentication
 
 
 class ConnectionsPool

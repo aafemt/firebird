@@ -176,13 +176,13 @@ enum db_info_crypt			/* flags set in fb_info_crypt_state */
 
 enum info_provider_features // response to fb_info_provider_features
 {
-	fb_feature_multi_statements 	= 0,    // Multiple prepared statements in single attachment
-	fb_feature_multi_transactions	= 1,	// Multiple concurrent transaction in single attachment
-	fb_feature_named_parameters		= 2,	// Query parameters can be named
-	fb_feature_session_reset		= 3,	// ALTER SESSION RESET is supported
-	fb_feature_read_consistency		= 4,	// Read consistency TIL is supported
-	fb_feature_statement_timeout	= 5,	// Statement timeout is supported
-	fb_feature_statement_long_life  = 6,    // Prepared statement can survive transaction end
+	fb_feature_multi_statements 	= 1,    // Multiple prepared statements in single attachment
+	fb_feature_multi_transactions	= 2,	// Multiple concurrent transaction in single attachment
+	fb_feature_named_parameters		= 3,	// Query parameters can be named
+	fb_feature_session_reset		= 4,	// ALTER SESSION RESET is supported
+	fb_feature_read_consistency		= 5,	// Read consistency TIL is supported
+	fb_feature_statement_timeout	= 6,	// Statement timeout is supported
+	fb_feature_statement_long_life  = 7,    // Prepared statement can survive transaction end
 
 	info_provider_features_max      // Not really a feature. Keep this last.
 };

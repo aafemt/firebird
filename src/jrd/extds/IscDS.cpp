@@ -144,7 +144,7 @@ void IscConnection::attach(thread_db* tdbb)
 		}
 	}
 
-	char buff[64];
+	char buff[BUFFER_TINY];
 	{
 		EngineCallbackGuard guard(tdbb, *this, FB_FUNCTION);
 
@@ -156,7 +156,7 @@ void IscConnection::attach(thread_db* tdbb)
 	}
 
 	memset(m_features, false, sizeof(m_features));
-    m_sqlDialect = 1;
+	m_sqlDialect = 1;
 
 	const char* p = buff, *end = buff + sizeof(buff);
 	while (p < end)
@@ -174,6 +174,11 @@ void IscConnection::attach(thread_db* tdbb)
 			case fb_info_provider_features:
 			    for (int i = 0; i < len; i++)
                 {
+                    if (p[i] == 0)
+                    {
+                        ERR_post(Arg::Gds(isc_random) << Arg::Str("Bad provider feature value"));
+                    }
+
                     if (p[i] < info_provider_features_max)
                     {
                         setFeature(static_cast<info_provider_features>(p[i]));
