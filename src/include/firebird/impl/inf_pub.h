@@ -184,7 +184,7 @@ enum info_features // response to fb_info_features
 	fb_feature_statement_timeout	= 6,	// Statement timeout is supported
 	fb_feature_statement_long_life  = 7,    // Prepared statements are not dropped on transaction end
 
-	info_provider_features_max      // Not really a feature. Keep this last.
+	fb_feature_max      // Not really a feature. Keep this last.
 };
 
 #define isc_info_version isc_info_isc_version

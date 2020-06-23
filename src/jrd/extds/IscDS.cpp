@@ -144,7 +144,7 @@ void IscConnection::attach(thread_db* tdbb)
 		}
 	}
 
-	char buff[BUFFER_TINY];
+	unsigned char buff[BUFFER_TINY];
 	{
 		EngineCallbackGuard guard(tdbb, *this, FB_FUNCTION);
 
@@ -158,7 +158,7 @@ void IscConnection::attach(thread_db* tdbb)
 	memset(m_features, false, sizeof(m_features));
 	m_sqlDialect = 1;
 
-	const char* p = buff, *end = buff + sizeof(buff);
+	const unsigned char* p = buff, *end = buff + sizeof(buff);
 	while (p < end)
 	{
 		const UCHAR item = *p++;
@@ -179,7 +179,7 @@ void IscConnection::attach(thread_db* tdbb)
                         ERR_post(Arg::Gds(isc_random) << Arg::Str("Bad provider feature value"));
                     }
 
-                    if (p[i] < info_provider_features_max)
+                    if (p[i] < fb_feature_max)
                     {
                         setFeature(static_cast<info_features>(p[i]));
                     }
@@ -310,7 +310,7 @@ bool IscConnection::validate(Jrd::thread_db* tdbb)
 	EngineCallbackGuard guard(tdbb, *this, FB_FUNCTION);
 
 	const unsigned char info[] = {isc_info_attachment_id, isc_info_end};
-	char buff[32];
+	unsigned char buff[32];
 
 	return m_iscProvider.isc_database_info(&status, &m_handle,
 		sizeof(info), info, sizeof(buff), buff) == 0;
@@ -539,8 +539,8 @@ void IscStatement::doPrepare(thread_db* tdbb, const string& sql)
 	m_inputs = m_in_xsqlda ? m_in_xsqlda->sqld : 0;
 
 	// get statement type
-	const char stmt_info[] = {isc_info_sql_stmt_type};
-	char info_buff[16];
+	const unsigned char stmt_info[] = {isc_info_sql_stmt_type};
+	unsigned char info_buff[16];
 	{
 		EngineCallbackGuard guard(tdbb, *this, FB_FUNCTION);
 		if (m_iscProvider.isc_dsql_sql_info(&status, &m_handle, sizeof(stmt_info), stmt_info,
@@ -1070,13 +1070,13 @@ ISC_STATUS ISC_EXPORT IscProvider::isc_database_info(FbStatusVector* user_status
 									short info_len,
 									const unsigned char* info,
 									short res_len,
-									char* res)
+									unsigned char* res)
 {
 	if (!m_api.database_info)
 		return notImplemented(user_status);
 
 	return (*m_api.database_info) (IscStatus(user_status), db_handle,
-			info_len, reinterpret_cast<const ISC_SCHAR*>(info), res_len, res);
+			info_len, reinterpret_cast<const ISC_SCHAR*>(info), res_len, reinterpret_cast<ISC_SCHAR*>(res));
 }
 
 void ISC_EXPORT IscProvider::isc_decode_date(const ISC_QUAD*,
@@ -1249,14 +1249,14 @@ ISC_STATUS ISC_EXPORT IscProvider::isc_dsql_set_cursor_name(FbStatusVector* user
 }
 
 ISC_STATUS ISC_EXPORT IscProvider::isc_dsql_sql_info(FbStatusVector* user_status,
-	isc_stmt_handle* stmt_handle, short items_len, const char* items,
-	short buffer_len, char* buffer)
+	isc_stmt_handle* stmt_handle, short items_len, const unsigned char* items,
+	short buffer_len, unsigned char* buffer)
 {
 	if (!m_api.dsql_sql_info)
 		return notImplemented(user_status);
 
-	return (*m_api.dsql_sql_info) (IscStatus(user_status), stmt_handle, items_len, items,
-				buffer_len, buffer);
+	return (*m_api.dsql_sql_info) (IscStatus(user_status), stmt_handle, items_len, reinterpret_cast<const ISC_SCHAR*>(items),
+				buffer_len, reinterpret_cast<ISC_SCHAR*>(buffer));
 }
 
 void ISC_EXPORT IscProvider::isc_encode_date(const void*,
@@ -1541,9 +1541,9 @@ ISC_STATUS ISC_EXPORT IscProvider::isc_transact_request(FbStatusVector* user_sta
 	return notImplemented(user_status);
 }
 
-ISC_LONG ISC_EXPORT IscProvider::isc_vax_integer(const char* p, short len)
+ISC_LONG ISC_EXPORT IscProvider::isc_vax_integer(const unsigned char* p, short len)
 {
-	return ::isc_vax_integer(p, len);
+	return ::isc_vax_integer((ISC_SCHAR*)p, len);
 }
 
 ISC_INT64 ISC_EXPORT IscProvider::isc_portable_integer(const unsigned char* p, short len)

@@ -528,7 +528,7 @@ protected:
 	int m_sqlDialect;	// must be filled in attach call
 	bool m_wrapErrors;
 	bool m_broken;
-	bool m_features[info_provider_features_max];
+	bool m_features[fb_feature_max];
 };
 
 class Transaction : public Firebird::PermanentStorage
