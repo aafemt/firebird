@@ -65,6 +65,9 @@
 		   should be used.
 **/
 
+namespace Firebird
+{
+
 extern const char*	GCPolicyCooperative;
 extern const char*	GCPolicyBackground;
 extern const char*	GCPolicyCombined;
@@ -81,7 +84,7 @@ const int MODE_CLASSIC = 2;
 
 const char* const CONFIG_FILE = "firebird.conf";
 
-class Config : public Firebird::RefCounted, public Firebird::GlobalStorage
+class Config : public RefCounted, public GlobalStorage
 {
 public:
 	typedef IPTR ConfigValue;
@@ -188,12 +191,12 @@ private:
 	static const ConfigEntry entries[MAX_CONFIG_KEY];
 
 	ConfigValue values[MAX_CONFIG_KEY];
-	mutable Firebird::PathName notifyDatabase;
+	mutable PathName notifyDatabase;
 
 public:
 	explicit Config(const ConfigFile& file);				// use to build default config
 	Config(const ConfigFile& file, const Config& base);		// use to build db-specific config
-	Config(const ConfigFile& file, const Config& base, const Firebird::PathName& notify);	// use to build db-specific config with notifucation
+	Config(const ConfigFile& file, const Config& base, const PathName& notify);	// use to build db-specific config with notifucation
 	~Config();
 
 	// Call it when database with given config is created
@@ -209,14 +212,14 @@ public:
 	// in command line to load firebird.conf from that root, though in other
 	// cases firebird.conf may be also used to specify root.
 
-	static void setRootDirectoryFromCommandLine(const Firebird::PathName& newRoot);
-	static const Firebird::PathName* getCommandLineRootDirectory();
+	static void setRootDirectoryFromCommandLine(const PathName& newRoot);
+	static const PathName* getCommandLineRootDirectory();
 
 	// Master config - needed to provide per-database config
-	static const Firebird::RefPtr<const Config>& getDefaultConfig();
+	static const RefPtr<const Config>& getDefaultConfig();
 
 	// Merge config entries from DPB into existing config
-	static void merge(Firebird::RefPtr<const Config>& config, const Firebird::string* dpbConfig);
+	static void merge(RefPtr<const Config>& config, const string* dpbConfig);
 
 	// reports key to be used by the following functions
 	static unsigned int getKeyByName(ConfigName name);
@@ -397,7 +400,7 @@ public:
 
 // Implementation of interface to access master configuration file
 class FirebirdConf FB_FINAL :
-	public Firebird::RefCntIface<Firebird::IFirebirdConfImpl<FirebirdConf, Firebird::CheckStatusWrapper> >
+	public RefCntIface<IFirebirdConfImpl<FirebirdConf, CheckStatusWrapper> >
 {
 public:
 	FirebirdConf(const Config* existingConfig)
@@ -409,15 +412,17 @@ public:
 	SINT64 asInteger(unsigned int key);
 	const char* asString(unsigned int key);
 	FB_BOOLEAN asBoolean(unsigned int key);
-	unsigned int getVersion(Firebird::CheckStatusWrapper* status);
+	unsigned int getVersion(CheckStatusWrapper* status);
 
 	int release();
 
 private:
-	Firebird::RefPtr<const Config> config;
+	RefPtr<const Config> config;
 };
 
 // Create default instance of IFirebirdConf interface
-Firebird::IFirebirdConf* getFirebirdConfig();
+IFirebirdConf* getFirebirdConfig();
+
+} // namespace Firebird
 
 #endif // COMMON_CONFIG_H

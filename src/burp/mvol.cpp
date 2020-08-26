@@ -203,7 +203,7 @@ static void calc_hash(Firebird::string& valid, Firebird::IDbCryptPlugin* plugin)
 //____________________________________________________________
 //
 //
-static Firebird::IKeyHolderPlugin* mvol_get_holder(BurpGlobals* tdgbl, Firebird::RefPtr<const Config>& config)
+static Firebird::IKeyHolderPlugin* mvol_get_holder(BurpGlobals* tdgbl, Firebird::RefPtr<const Firebird::Config>& config)
 {
 	fb_assert(tdgbl->gbl_sw_keyholder);
 
@@ -238,7 +238,7 @@ Firebird::ICryptKeyCallback* MVOL_get_crypt(BurpGlobals* tdgbl)
 	{
 		// Get per-DB config
 		Firebird::PathName dummy;
-		Firebird::RefPtr<const Config> config;
+		Firebird::RefPtr<const Firebird::Config> config;
 		expandDatabaseName(tdgbl->gbl_database_file_name, dummy, &config);
 
 		mvol_get_holder(tdgbl, config);
@@ -269,7 +269,7 @@ static void start_crypt(BurpGlobals* tdgbl)
 
 	// Get per-DB config
 	Firebird::PathName dummy;
-	Firebird::RefPtr<const Config> config;
+	Firebird::RefPtr<const Firebird::Config> config;
 	expandDatabaseName(tdgbl->gbl_database_file_name, dummy, &config);
 
 	// Prepare key holders

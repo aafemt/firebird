@@ -297,7 +297,7 @@ class Database : public pool_alloc<type_dbb>
 	public:
 		static GlobalObjectHolder* init(const Firebird::string& id,
 										const Firebird::PathName& filename,
-										Firebird::RefPtr<const Config> config);
+										Firebird::RefPtr<const Firebird::Config> config);
 
 		~GlobalObjectHolder();
 
@@ -307,7 +307,7 @@ class Database : public pool_alloc<type_dbb>
 
 	private:
 		const Firebird::string m_id;
-		const Firebird::RefPtr<const Config> m_config;
+		const Firebird::RefPtr<const Firebird::Config> m_config;
 		const Firebird::AutoPtr<const Replication::Config> m_replConfig;
 		Firebird::AutoPtr<LockManager> m_lockMgr;
 		Firebird::AutoPtr<EventManager> m_eventMgr;
@@ -316,7 +316,7 @@ class Database : public pool_alloc<type_dbb>
 
 		explicit GlobalObjectHolder(const Firebird::string& id,
 									const Firebird::PathName& filename,
-									Firebird::RefPtr<const Config> config)
+									Firebird::RefPtr<const Firebird::Config> config)
 			: m_id(getPool(), id), m_config(config),
 			  m_replConfig(Replication::Config::get(filename))
 		{}
@@ -515,7 +515,7 @@ public:
 	BackupManager*	dbb_backup_manager;						// physical backup manager
 	ISC_TIMESTAMP_TZ dbb_creation_date; 					// creation timestamp in GMT
 	ExternalFileDirectoryList* dbb_external_file_directory_list;
-	Firebird::RefPtr<const Config> dbb_config;
+	Firebird::RefPtr<const Firebird::Config> dbb_config;
 
 	CryptoManager* dbb_crypto_manager;
 	Firebird::RefPtr<ExistenceRefMutex> dbb_init_fini;

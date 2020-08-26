@@ -46,8 +46,6 @@
 
 // forward
 
-class Config;
-
 namespace Ods {
 
 struct pag;

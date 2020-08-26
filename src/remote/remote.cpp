@@ -604,14 +604,14 @@ void rem_port::linkParent(rem_port* const parent)
 	parent->port_clients = parent->port_next = this;
 }
 
-const Firebird::RefPtr<const Config>& rem_port::getPortConfig() const
+const Firebird::RefPtr<const Firebird::Config>& rem_port::getPortConfig() const
 {
-	return port_config.hasData() ? port_config : Config::getDefaultConfig();
+	return port_config.hasData() ? port_config : Firebird::Config::getDefaultConfig();
 }
 
-Firebird::RefPtr<const Config> rem_port::getPortConfig()
+Firebird::RefPtr<const Firebird::Config> rem_port::getPortConfig()
 {
-	return port_config.hasData() ? port_config : Config::getDefaultConfig();
+	return port_config.hasData() ? port_config : Firebird::Config::getDefaultConfig();
 }
 
 void rem_port::unlinkParent()
@@ -958,7 +958,7 @@ void ClntAuthBlock::extractDataFromPluginTo(Firebird::ClumpletWriter& user_id)
 	addMultiPartConnectParameter(dataFromPlugin, user_id, CNCT_specific_data);
 
 	// Client's wirecrypt requested level
-	user_id.insertInt(CNCT_client_crypt, clntConfig->getWireCrypt(WC_CLIENT));
+	user_id.insertInt(CNCT_client_crypt, clntConfig->getWireCrypt(Firebird::WC_CLIENT));
 }
 
 void ClntAuthBlock::resetClnt(const CSTRING* listStr)
@@ -1009,7 +1009,7 @@ void ClntAuthBlock::resetClnt(const CSTRING* listStr)
 	plugins.set(final.c_str());
 }
 
-Firebird::RefPtr<const Config>* ClntAuthBlock::getConfig()
+Firebird::RefPtr<const Firebird::Config>* ClntAuthBlock::getConfig()
 {
 	return clntConfig.hasData() ? &clntConfig : NULL;
 }
@@ -1020,10 +1020,10 @@ void ClntAuthBlock::storeDataForPlugin(unsigned int length, const unsigned char*
 	HANDSHAKE_DEBUG(fprintf(stderr, "Cli: accepted data for plugin length=%d\n", length));
 }
 
-Firebird::RefPtr<const Config> REMOTE_get_config(const Firebird::PathName* dbName,
+Firebird::RefPtr<const Firebird::Config> REMOTE_get_config(const Firebird::PathName* dbName,
 	const Firebird::string* dpb_config)
 {
-	Firebird::RefPtr<const Config> config;
+	Firebird::RefPtr<const Firebird::Config> config;
 
 	if (dbName && dbName->hasData())
 	{
@@ -1031,9 +1031,9 @@ Firebird::RefPtr<const Config> REMOTE_get_config(const Firebird::PathName* dbNam
 		expandDatabaseName(*dbName, dummy, &config);
 	}
 	else
-		config = Config::getDefaultConfig();
+		config = Firebird::Config::getDefaultConfig();
 
-	Config::merge(config, dpb_config);
+	Firebird::Config::merge(config, dpb_config);
 
 	return config;
 }
@@ -1204,7 +1204,7 @@ bool rem_port::tryKeyType(const KnownServerKey& srvKey, InternalCryptKey* cryptK
 		return false;
 	}
 
-	if (getPortConfig()->getWireCrypt(WC_CLIENT) == WIRE_CRYPT_DISABLED)
+	if (getPortConfig()->getWireCrypt(Firebird::WC_CLIENT) == Firebird::WIRE_CRYPT_DISABLED)
 	{
 		port_crypt_complete = true;
 		return true;

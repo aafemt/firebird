@@ -1707,7 +1707,7 @@ SLONG API_ROUTINE gds__get_prefix(SSHORT arg_type, const TEXT* passed_string)
 	if (arg_type == IB_PREFIX_TYPE)
 	{
 		// it's very important to do it BEFORE GDS_init_prefix()
-		Config::setRootDirectoryFromCommandLine(prefix);
+		Firebird::Config::setRootDirectoryFromCommandLine(prefix);
 	}
 
 	GDS_init_prefix();
@@ -3862,7 +3862,7 @@ public:
 		Firebird::PathName prefix;
 		try
 		{
-			prefix = Config::getRootDirectory();
+			prefix = Firebird::Config::getRootDirectory();
 			if (prefix.isEmpty() && !GetProgramFilesDir(prefix))
 				prefix = FB_CONFDIR[0] ? FB_CONFDIR : FB_PREFIX;
 		}

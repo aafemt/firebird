@@ -833,7 +833,7 @@ private:
 	Firebird::HalfStaticArray<InternalCryptKey*, 1> cryptKeys;		// Wire crypt keys that came from plugin(s) last time
 	Firebird::string dpbConfig;					// User's configuration parameters
 	Firebird::PathName dpbPlugins;				// User's plugin list
-	Firebird::RefPtr<const Config> clntConfig;	// Used to get plugins list and pass to port
+	Firebird::RefPtr<const Firebird::Config> clntConfig;	// Used to get plugins list and pass to port
 	Firebird::AutoPtr<RmtAuthBlock> remAuthBlock;	//Authentication block if present
 	unsigned nextKey;							// First key to be analyzed
 
@@ -845,7 +845,7 @@ private:
 			: pluginItr(Firebird::IPluginManager::TYPE_KEY_HOLDER, "NoDefault"), currentIface(nullptr)
 		{ }
 
-		Firebird::ICryptKeyCallback* create(const Config* conf);
+		Firebird::ICryptKeyCallback* create(const Firebird::Config* conf);
 
 		// Firebird::ICryptKeyCallback implementation
 		unsigned callback(unsigned dataLength, const void* data, unsigned bufferLength, void* buffer);
@@ -885,7 +885,7 @@ public:
 	Firebird::PathName getPluginName();
 	void tryNewKeys(rem_port*);
 	void releaseKeys(unsigned from);
-	Firebird::RefPtr<const Config>* getConfig();
+	Firebird::RefPtr<const Firebird::Config>* getConfig();
 	void createCryptCallback(Firebird::ICryptKeyCallback** callback);
 
 	// Firebird::IClientBlock implementation
@@ -1080,7 +1080,7 @@ struct rem_port : public Firebird::GlobalStorage, public Firebird::RefCounted
 	OBJCT			port_last_object_id;	// cached last id
 	Firebird::ObjectsArray< Firebird::Array<char> > port_queue;
 	FB_SIZE_T		port_qoffset;			// current packet in the queue
-	Firebird::RefPtr<const Config> port_config;	// connection-specific configuration info
+	Firebird::RefPtr<const Firebird::Config> port_config;	// connection-specific configuration info
 
 	// Authentication and crypt stuff
 	ServerAuthBase*							port_srv_auth;
@@ -1168,8 +1168,8 @@ public:
 	static bool checkCompression();
 	void linkParent(rem_port* const parent);
 	void unlinkParent();
-	Firebird::RefPtr<const Config> getPortConfig();
-	const Firebird::RefPtr<const Config>& getPortConfig() const;
+	Firebird::RefPtr<const Firebird::Config> getPortConfig();
+	const Firebird::RefPtr<const Firebird::Config>& getPortConfig() const;
 	void versionInfo(Firebird::string& version) const;
 
 	bool extractNewKeys(CSTRING* to, bool flagPlugList = false)

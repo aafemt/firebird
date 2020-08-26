@@ -1291,7 +1291,7 @@ public:
 		try
 		{
 			PathName dummy;
-			Firebird::RefPtr<const Config> config;
+			Firebird::RefPtr<const Firebird::Config> config;
 			expandDatabaseName(dbName, dummy, &config);
 
 			IFirebirdConf* firebirdConf = FB_NEW FirebirdConf(config);

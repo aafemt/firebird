@@ -62,9 +62,9 @@ public:
 	{
 		try
 		{
-			ConfigFile file(fb_utils::getPrefix(Firebird::IConfigManager::DIR_CONF, CONFIG_FILE),
+			ConfigFile file(fb_utils::getPrefix(Firebird::IConfigManager::DIR_CONF, Firebird::CONFIG_FILE),
 				ConfigFile::ERROR_WHEN_MISS);
-			defaultConfig = FB_NEW Config(file);
+			defaultConfig = FB_NEW Firebird::Config(file);
 		}
 		catch (const Firebird::status_exception& ex)
 		{
@@ -76,20 +76,20 @@ public:
 			missConf = true;
 
 			ConfigFile file(ConfigFile::USE_TEXT, "");
-			defaultConfig = FB_NEW Config(file);
+			defaultConfig = FB_NEW Firebird::Config(file);
 		}
 	}
 
 	/***
 	It was a kind of getting ready for changing config remotely...
 
-	void changeDefaultConfig(Config* newConfig)
+	void changeDefaultConfig(Firebird::Config* newConfig)
 	{
 		defaultConfig = newConfig;
 	}
 	***/
 
-	Firebird::RefPtr<const Config>& getDefaultConfig()
+	Firebird::RefPtr<const Firebird::Config>& getDefaultConfig()
 	{
 		return defaultConfig;
 	}
@@ -101,13 +101,13 @@ public:
 
 	Firebird::IFirebirdConf* getFirebirdConf()
 	{
-		Firebird::IFirebirdConf* rc = FB_NEW FirebirdConf(defaultConfig);
+		Firebird::IFirebirdConf* rc = FB_NEW Firebird::FirebirdConf(defaultConfig);
 		rc->addRef();
 		return rc;
 	}
 
 private:
-	Firebird::RefPtr<const Config> defaultConfig;
+	Firebird::RefPtr<const Firebird::Config> defaultConfig;
 
     ConfigImpl(const ConfigImpl&);
     void operator=(const ConfigImpl&);
@@ -124,8 +124,10 @@ Firebird::InitInstance<ConfigImpl> firebirdConf;
 
 }	// anonymous namespace
 
+namespace Firebird
+{
 
-Firebird::IFirebirdConf* getFirebirdConfig()
+IFirebirdConf* getFirebirdConfig()
 {
 	return firebirdConf().getFirebirdConf();
 }
@@ -243,7 +245,7 @@ Config::Config(const ConfigFile& file)
 {
 	// Array to save string temporarily
 	// Will be finally saved by loadValues() in the end of ctor
-	Firebird::ObjectsArray<ConfigFile::String> tempStrings(getPool());
+	ObjectsArray<ConfigFile::String> tempStrings(getPool());
 
 	// Iterate through the known configuration entries
 	for (unsigned int i = 0; i < MAX_CONFIG_KEY; i++)
@@ -277,7 +279,7 @@ Config::Config(const ConfigFile& file, const Config& base)
 	loadValues(file);
 }
 
-Config::Config(const ConfigFile& file, const Config& base, const Firebird::PathName& notify)
+Config::Config(const ConfigFile& file, const Config& base, const PathName& notify)
 	: notifyDatabase(*getDefaultMemoryPool())
 {
 	// Iterate through the known configuration entries
@@ -300,7 +302,7 @@ void Config::notify() const
 		notifyDatabase.erase();
 }
 
-void Config::merge(Firebird::RefPtr<const Config>& config, const Firebird::string* dpbConfig)
+void Config::merge(RefPtr<const Config>& config, const string* dpbConfig)
 {
 	if (dpbConfig && dpbConfig->hasData())
 	{
@@ -374,7 +376,7 @@ Config::~Config()
  *	Public interface
  */
 
-const Firebird::RefPtr<const Config>& Config::getDefaultConfig()
+const RefPtr<const Config>& Config::getDefaultConfig()
 {
 	return firebirdConf().getDefaultConfig();
 }
@@ -386,19 +388,19 @@ bool Config::missFirebirdConf()
 
 const char* Config::getInstallDirectory()
 {
-	return Firebird::fb_get_master_interface()->getConfigManager()->getInstallDirectory();
+	return fb_get_master_interface()->getConfigManager()->getInstallDirectory();
 }
 
-static Firebird::PathName* rootFromCommandLine = 0;
+static PathName* rootFromCommandLine = 0;
 
-void Config::setRootDirectoryFromCommandLine(const Firebird::PathName& newRoot)
+void Config::setRootDirectoryFromCommandLine(const PathName& newRoot)
 {
 	delete rootFromCommandLine;
 	rootFromCommandLine = FB_NEW_POOL(*getDefaultMemoryPool())
-		Firebird::PathName(*getDefaultMemoryPool(), newRoot);
+		PathName(*getDefaultMemoryPool(), newRoot);
 }
 
-const Firebird::PathName* Config::getCommandLineRootDirectory()
+const PathName* Config::getCommandLineRootDirectory()
 {
 	return rootFromCommandLine;
 }
@@ -411,7 +413,7 @@ const char* Config::getRootDirectory()
 		return rootFromCommandLine->c_str();
 	}
 
-	return Firebird::fb_get_master_interface()->getConfigManager()->getRootDirectory();
+	return fb_get_master_interface()->getConfigManager()->getRootDirectory();
 }
 
 
@@ -754,23 +756,23 @@ const char* Config::getPlugins(unsigned int type) const
 {
 	switch (type)
 	{
-		case Firebird::IPluginManager::TYPE_PROVIDER:
+		case IPluginManager::TYPE_PROVIDER:
 			return (const char*) values[KEY_PLUG_PROVIDERS];
-		case Firebird::IPluginManager::TYPE_AUTH_SERVER:
+		case IPluginManager::TYPE_AUTH_SERVER:
 			return (const char*) values[KEY_PLUG_AUTH_SERVER];
-		case Firebird::IPluginManager::TYPE_AUTH_CLIENT:
+		case IPluginManager::TYPE_AUTH_CLIENT:
 			return (const char*) values[KEY_PLUG_AUTH_CLIENT];
-		case Firebird::IPluginManager::TYPE_AUTH_USER_MANAGEMENT:
+		case IPluginManager::TYPE_AUTH_USER_MANAGEMENT:
 			return (const char*) values[KEY_PLUG_AUTH_MANAGE];
-		case Firebird::IPluginManager::TYPE_TRACE:
+		case IPluginManager::TYPE_TRACE:
 			return (const char*) values[KEY_PLUG_TRACE];
-		case Firebird::IPluginManager::TYPE_WIRE_CRYPT:
+		case IPluginManager::TYPE_WIRE_CRYPT:
 			return (const char*) values[KEY_PLUG_WIRE_CRYPT];
-		case Firebird::IPluginManager::TYPE_KEY_HOLDER:
+		case IPluginManager::TYPE_KEY_HOLDER:
 			return (const char*) values[KEY_PLUG_KEY_HOLDER];
 	}
 
-	(Firebird::Arg::Gds(isc_random) << "Internal error in Config::getPlugins(): unknown plugin type requested").raise();
+	(Arg::Gds(isc_random) << "Internal error in Config::getPlugins(): unknown plugin type requested").raise();
 	return NULL;		// compiler warning silencer
 }
 
@@ -801,7 +803,7 @@ static inline void checkKey(unsigned int& key)
 		key &= KEY_MASK;
 }
 
-unsigned int FirebirdConf::getVersion(Firebird::CheckStatusWrapper* status)
+unsigned int FirebirdConf::getVersion(CheckStatusWrapper* status)
 {
 	return getFullVersion();
 }
@@ -845,7 +847,7 @@ const char* Config::getSecurityDatabase() const
 	const char* strVal = get<const char*>(KEY_SECURITY_DATABASE);
 	if (!strVal)
 	{
-		strVal = Firebird::MasterInterfacePtr()->getConfigManager()->getDefaultSecurityDb();
+		strVal = MasterInterfacePtr()->getConfigManager()->getDefaultSecurityDb();
 		if (!strVal)
 			strVal = "security.db";
 	}
@@ -861,7 +863,7 @@ int Config::getWireCrypt(WireCryptMode wcMode) const
 		return wcMode == WC_CLIENT ? WIRE_CRYPT_ENABLED : WIRE_CRYPT_REQUIRED;
 	}
 
-	Firebird::NoCaseString wireCrypt(wc);
+	NoCaseString wireCrypt(wc);
 	if (wireCrypt == "DISABLED")
 		return WIRE_CRYPT_DISABLED;
 	if (wireCrypt == "ENABLED")
@@ -951,3 +953,5 @@ const char* Config::getDataTypeCompatibility() const
 {
 	return get<const char*>(KEY_DATA_TYPE_COMPATIBILITY);
 }
+
+} // namespace Firebird

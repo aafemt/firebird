@@ -260,8 +260,8 @@ public:
 class Get : public Firebird::GetPlugins<Firebird::IManagement>
 {
 public:
-	explicit Get(const Config* firebirdConf);
-	Get(const Config* firebirdConf, const char* plugName);
+	explicit Get(const Firebird::Config* firebirdConf);
+	Get(const Firebird::Config* firebirdConf, const char* plugName);
 };
 
 int setGsecCode(int code, unsigned int operation);
