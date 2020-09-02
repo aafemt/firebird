@@ -246,7 +246,8 @@ interface PluginManager : Versioned
 	const uint TYPE_WIRE_CRYPT = 8;
 	const uint TYPE_DB_CRYPT = 9;
 	const uint TYPE_KEY_HOLDER = 10;
-	const uint TYPE_COUNT = 11;	// keep in sync
+	const uint TYPE_REPLICATOR = 11;
+	const uint TYPE_COUNT = 12;	// keep in sync
 	//// TODO: TYPE_COUNT is not count. And these constants starts from 1, different than DIR_* ones.
 
 	// Main function called by plugin modules in firebird_plugin()
@@ -1555,17 +1556,36 @@ interface Int128 : Versioned
 
 // Replication interfaces
 
-interface ReplicatedRecord : Versioned
+interface ReplicatedField : Versioned
 {
-	uint getRawLength();
-	const uchar* getRawData();
+	// Return name of field. NULL is returned on error
+	const string getName();
+	// Return field type or zero if field not exists
+	uint getType();
+	// Return subtype if applicable
+	uint getSubType();
+	// Return scale fo the field. Behavior is undefined for non-numeric fields
+	uint getScale();
+	// Return maximum length of field data in bytes
+	uint getLength();
+	// Return character set without collation part for text or CLOB fields
+	uint getCharSet();
+	// Return pointer to data. nullptr is returned if value is NULL
+	const void* getData();
 }
 
-interface ReplicatedBlob : Versioned
+interface ReplicatedRecord : Versioned
 {
-	uint getLength();
-	boolean isEof();
-	uint getSegment(uint length, uchar* buffer);
+	// Return count of fields
+	uint getCount();
+	// Return ReplicatedField with given index. nullptr is returned if index is invalid.
+	// Returned refeence is valid until next call of getField() or end of the record life.
+	ReplicatedField getField(uint index);
+
+	// Return size of raw data
+	uint getRawLength();
+	// Dirty method to return record buffer in internal format
+	const uchar* getRawData();
 }
 
 interface ReplicatedTransaction : Disposable
@@ -1578,6 +1598,7 @@ interface ReplicatedTransaction : Disposable
 	boolean releaseSavepoint();
 	boolean rollbackSavepoint();
 
+	// ReplicatedRecords parameters point to local objects, do not ever store the pointer.
 	boolean insertRecord(const string name,
 					  	 ReplicatedRecord record);
 	boolean updateRecord(const string name,
@@ -1586,17 +1607,18 @@ interface ReplicatedTransaction : Disposable
 	boolean deleteRecord(const string name,
 					  	 ReplicatedRecord record);
 
-	boolean storeBlob(ISC_QUAD blobId, ReplicatedBlob blob);
-
 	boolean executeSql(const string sql);
 	boolean executeSqlIntl(uint charset, const string sql);
 }
 
-interface ReplicatedSession : Disposable
+interface ReplicatedSession : PluginBase
 {
+	// Returned value is guaranteed to be valid only after other method has returned an error.
 	Status getStatus();
 
-	ReplicatedTransaction startTransaction(int64 number);
+	// Parameter don't need to be released if not used.
+	void setAttachment(Attachment attachment);
+	ReplicatedTransaction startTransaction(Transaction transaction, int64 number);
 	boolean cleanupTransaction(int64 number);
 
 	boolean setSequence(const string name, int64 value);

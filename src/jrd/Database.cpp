@@ -322,9 +322,6 @@ namespace Jrd
 
 	bool Database::isReplicating(thread_db* tdbb)
 	{
-		if (!replManager())
-			return false;
-
 		Sync sync(&dbb_repl_sync, FB_FUNCTION);
 		sync.lock(SYNC_SHARED);
 
@@ -499,12 +496,12 @@ namespace Jrd
 		return m_eventMgr;
 	}
 
-	Replication::Manager* Database::GlobalObjectHolder::getReplManager()
+	Replication::Manager* Database::GlobalObjectHolder::getReplManager(bool create)
 	{
 		if (!m_replConfig)
 			return nullptr;
 
-		if (!m_replMgr)
+		if (!m_replMgr && create)
 		{
 			MutexLockGuard guard(m_mutex, FB_FUNCTION);
 

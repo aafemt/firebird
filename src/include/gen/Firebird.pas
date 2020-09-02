@@ -107,8 +107,8 @@ type
 	IDecFloat16 = class;
 	IDecFloat34 = class;
 	IInt128 = class;
+	IReplicatedField = class;
 	IReplicatedRecord = class;
-	IReplicatedBlob = class;
 	IReplicatedTransaction = class;
 	IReplicatedSession = class;
 
@@ -666,11 +666,17 @@ type
 	IDecFloat34_fromStringPtr = procedure(this: IDecFloat34; status: IStatus; from: PAnsiChar; to_: FB_DEC34Ptr); cdecl;
 	IInt128_toStringPtr = procedure(this: IInt128; status: IStatus; from: FB_I128Ptr; scale: Integer; bufferLength: Cardinal; buffer: PAnsiChar); cdecl;
 	IInt128_fromStringPtr = procedure(this: IInt128; status: IStatus; scale: Integer; from: PAnsiChar; to_: FB_I128Ptr); cdecl;
+	IReplicatedField_getNamePtr = function(this: IReplicatedField): PAnsiChar; cdecl;
+	IReplicatedField_getTypePtr = function(this: IReplicatedField): Cardinal; cdecl;
+	IReplicatedField_getSubTypePtr = function(this: IReplicatedField): Cardinal; cdecl;
+	IReplicatedField_getScalePtr = function(this: IReplicatedField): Cardinal; cdecl;
+	IReplicatedField_getLengthPtr = function(this: IReplicatedField): Cardinal; cdecl;
+	IReplicatedField_getCharSetPtr = function(this: IReplicatedField): Cardinal; cdecl;
+	IReplicatedField_getDataPtr = function(this: IReplicatedField): Pointer; cdecl;
+	IReplicatedRecord_getCountPtr = function(this: IReplicatedRecord): Cardinal; cdecl;
+	IReplicatedRecord_getFieldPtr = function(this: IReplicatedRecord; index: Cardinal): IReplicatedField; cdecl;
 	IReplicatedRecord_getRawLengthPtr = function(this: IReplicatedRecord): Cardinal; cdecl;
 	IReplicatedRecord_getRawDataPtr = function(this: IReplicatedRecord): BytePtr; cdecl;
-	IReplicatedBlob_getLengthPtr = function(this: IReplicatedBlob): Cardinal; cdecl;
-	IReplicatedBlob_isEofPtr = function(this: IReplicatedBlob): Boolean; cdecl;
-	IReplicatedBlob_getSegmentPtr = function(this: IReplicatedBlob; length: Cardinal; buffer: BytePtr): Cardinal; cdecl;
 	IReplicatedTransaction_preparePtr = function(this: IReplicatedTransaction): Boolean; cdecl;
 	IReplicatedTransaction_commitPtr = function(this: IReplicatedTransaction): Boolean; cdecl;
 	IReplicatedTransaction_rollbackPtr = function(this: IReplicatedTransaction): Boolean; cdecl;
@@ -680,11 +686,11 @@ type
 	IReplicatedTransaction_insertRecordPtr = function(this: IReplicatedTransaction; name: PAnsiChar; record_: IReplicatedRecord): Boolean; cdecl;
 	IReplicatedTransaction_updateRecordPtr = function(this: IReplicatedTransaction; name: PAnsiChar; orgRecord: IReplicatedRecord; newRecord: IReplicatedRecord): Boolean; cdecl;
 	IReplicatedTransaction_deleteRecordPtr = function(this: IReplicatedTransaction; name: PAnsiChar; record_: IReplicatedRecord): Boolean; cdecl;
-	IReplicatedTransaction_storeBlobPtr = function(this: IReplicatedTransaction; blobId: ISC_QUAD; blob: IReplicatedBlob): Boolean; cdecl;
 	IReplicatedTransaction_executeSqlPtr = function(this: IReplicatedTransaction; sql: PAnsiChar): Boolean; cdecl;
 	IReplicatedTransaction_executeSqlIntlPtr = function(this: IReplicatedTransaction; charset: Cardinal; sql: PAnsiChar): Boolean; cdecl;
 	IReplicatedSession_getStatusPtr = function(this: IReplicatedSession): IStatus; cdecl;
-	IReplicatedSession_startTransactionPtr = function(this: IReplicatedSession; number: Int64): IReplicatedTransaction; cdecl;
+	IReplicatedSession_setAttachmentPtr = procedure(this: IReplicatedSession; attachment: IAttachment); cdecl;
+	IReplicatedSession_startTransactionPtr = function(this: IReplicatedSession; transaction: ITransaction; number: Int64): IReplicatedTransaction; cdecl;
 	IReplicatedSession_cleanupTransactionPtr = function(this: IReplicatedSession; number: Int64): Boolean; cdecl;
 	IReplicatedSession_setSequencePtr = function(this: IReplicatedSession; name: PAnsiChar; value: Int64): Boolean; cdecl;
 
@@ -1053,7 +1059,8 @@ type
 		const TYPE_WIRE_CRYPT = Cardinal(8);
 		const TYPE_DB_CRYPT = Cardinal(9);
 		const TYPE_KEY_HOLDER = Cardinal(10);
-		const TYPE_COUNT = Cardinal(11);
+		const TYPE_REPLICATOR = Cardinal(11);
+		const TYPE_COUNT = Cardinal(12);
 
 		procedure registerPluginFactory(pluginType: Cardinal; defaultName: PAnsiChar; factory: IPluginFactory);
 		procedure registerModule(cleanup: IPluginModule);
@@ -3524,7 +3531,43 @@ type
 		procedure fromString(status: IStatus; scale: Integer; from: PAnsiChar; to_: FB_I128Ptr); virtual; abstract;
 	end;
 
+	ReplicatedFieldVTable = class(VersionedVTable)
+		getName: IReplicatedField_getNamePtr;
+		getType: IReplicatedField_getTypePtr;
+		getSubType: IReplicatedField_getSubTypePtr;
+		getScale: IReplicatedField_getScalePtr;
+		getLength: IReplicatedField_getLengthPtr;
+		getCharSet: IReplicatedField_getCharSetPtr;
+		getData: IReplicatedField_getDataPtr;
+	end;
+
+	IReplicatedField = class(IVersioned)
+		const VERSION = 2;
+
+		function getName(): PAnsiChar;
+		function getType(): Cardinal;
+		function getSubType(): Cardinal;
+		function getScale(): Cardinal;
+		function getLength(): Cardinal;
+		function getCharSet(): Cardinal;
+		function getData(): Pointer;
+	end;
+
+	IReplicatedFieldImpl = class(IReplicatedField)
+		constructor create;
+
+		function getName(): PAnsiChar; virtual; abstract;
+		function getType(): Cardinal; virtual; abstract;
+		function getSubType(): Cardinal; virtual; abstract;
+		function getScale(): Cardinal; virtual; abstract;
+		function getLength(): Cardinal; virtual; abstract;
+		function getCharSet(): Cardinal; virtual; abstract;
+		function getData(): Pointer; virtual; abstract;
+	end;
+
 	ReplicatedRecordVTable = class(VersionedVTable)
+		getCount: IReplicatedRecord_getCountPtr;
+		getField: IReplicatedRecord_getFieldPtr;
 		getRawLength: IReplicatedRecord_getRawLengthPtr;
 		getRawData: IReplicatedRecord_getRawDataPtr;
 	end;
@@ -3532,6 +3575,8 @@ type
 	IReplicatedRecord = class(IVersioned)
 		const VERSION = 2;
 
+		function getCount(): Cardinal;
+		function getField(index: Cardinal): IReplicatedField;
 		function getRawLength(): Cardinal;
 		function getRawData(): BytePtr;
 	end;
@@ -3539,30 +3584,10 @@ type
 	IReplicatedRecordImpl = class(IReplicatedRecord)
 		constructor create;
 
+		function getCount(): Cardinal; virtual; abstract;
+		function getField(index: Cardinal): IReplicatedField; virtual; abstract;
 		function getRawLength(): Cardinal; virtual; abstract;
 		function getRawData(): BytePtr; virtual; abstract;
-	end;
-
-	ReplicatedBlobVTable = class(VersionedVTable)
-		getLength: IReplicatedBlob_getLengthPtr;
-		isEof: IReplicatedBlob_isEofPtr;
-		getSegment: IReplicatedBlob_getSegmentPtr;
-	end;
-
-	IReplicatedBlob = class(IVersioned)
-		const VERSION = 2;
-
-		function getLength(): Cardinal;
-		function isEof(): Boolean;
-		function getSegment(length: Cardinal; buffer: BytePtr): Cardinal;
-	end;
-
-	IReplicatedBlobImpl = class(IReplicatedBlob)
-		constructor create;
-
-		function getLength(): Cardinal; virtual; abstract;
-		function isEof(): Boolean; virtual; abstract;
-		function getSegment(length: Cardinal; buffer: BytePtr): Cardinal; virtual; abstract;
 	end;
 
 	ReplicatedTransactionVTable = class(DisposableVTable)
@@ -3575,7 +3600,6 @@ type
 		insertRecord: IReplicatedTransaction_insertRecordPtr;
 		updateRecord: IReplicatedTransaction_updateRecordPtr;
 		deleteRecord: IReplicatedTransaction_deleteRecordPtr;
-		storeBlob: IReplicatedTransaction_storeBlobPtr;
 		executeSql: IReplicatedTransaction_executeSqlPtr;
 		executeSqlIntl: IReplicatedTransaction_executeSqlIntlPtr;
 	end;
@@ -3592,7 +3616,6 @@ type
 		function insertRecord(name: PAnsiChar; record_: IReplicatedRecord): Boolean;
 		function updateRecord(name: PAnsiChar; orgRecord: IReplicatedRecord; newRecord: IReplicatedRecord): Boolean;
 		function deleteRecord(name: PAnsiChar; record_: IReplicatedRecord): Boolean;
-		function storeBlob(blobId: ISC_QUAD; blob: IReplicatedBlob): Boolean;
 		function executeSql(sql: PAnsiChar): Boolean;
 		function executeSqlIntl(charset: Cardinal; sql: PAnsiChar): Boolean;
 	end;
@@ -3610,23 +3633,24 @@ type
 		function insertRecord(name: PAnsiChar; record_: IReplicatedRecord): Boolean; virtual; abstract;
 		function updateRecord(name: PAnsiChar; orgRecord: IReplicatedRecord; newRecord: IReplicatedRecord): Boolean; virtual; abstract;
 		function deleteRecord(name: PAnsiChar; record_: IReplicatedRecord): Boolean; virtual; abstract;
-		function storeBlob(blobId: ISC_QUAD; blob: IReplicatedBlob): Boolean; virtual; abstract;
 		function executeSql(sql: PAnsiChar): Boolean; virtual; abstract;
 		function executeSqlIntl(charset: Cardinal; sql: PAnsiChar): Boolean; virtual; abstract;
 	end;
 
-	ReplicatedSessionVTable = class(DisposableVTable)
+	ReplicatedSessionVTable = class(PluginBaseVTable)
 		getStatus: IReplicatedSession_getStatusPtr;
+		setAttachment: IReplicatedSession_setAttachmentPtr;
 		startTransaction: IReplicatedSession_startTransactionPtr;
 		cleanupTransaction: IReplicatedSession_cleanupTransactionPtr;
 		setSequence: IReplicatedSession_setSequencePtr;
 	end;
 
-	IReplicatedSession = class(IDisposable)
-		const VERSION = 3;
+	IReplicatedSession = class(IPluginBase)
+		const VERSION = 4;
 
 		function getStatus(): IStatus;
-		function startTransaction(number: Int64): IReplicatedTransaction;
+		procedure setAttachment(attachment: IAttachment);
+		function startTransaction(transaction: ITransaction; number: Int64): IReplicatedTransaction;
 		function cleanupTransaction(number: Int64): Boolean;
 		function setSequence(name: PAnsiChar; value: Int64): Boolean;
 	end;
@@ -3634,9 +3658,13 @@ type
 	IReplicatedSessionImpl = class(IReplicatedSession)
 		constructor create;
 
-		procedure dispose(); virtual; abstract;
+		procedure addRef(); virtual; abstract;
+		function release(): Integer; virtual; abstract;
+		procedure setOwner(r: IReferenceCounted); virtual; abstract;
+		function getOwner(): IReferenceCounted; virtual; abstract;
 		function getStatus(): IStatus; virtual; abstract;
-		function startTransaction(number: Int64): IReplicatedTransaction; virtual; abstract;
+		procedure setAttachment(attachment: IAttachment); virtual; abstract;
+		function startTransaction(transaction: ITransaction; number: Int64): IReplicatedTransaction; virtual; abstract;
 		function cleanupTransaction(number: Int64): Boolean; virtual; abstract;
 		function setSequence(name: PAnsiChar; value: Int64): Boolean; virtual; abstract;
 	end;
@@ -8098,6 +8126,51 @@ begin
 	FbException.checkException(status);
 end;
 
+function IReplicatedField.getName(): PAnsiChar;
+begin
+	Result := ReplicatedFieldVTable(vTable).getName(Self);
+end;
+
+function IReplicatedField.getType(): Cardinal;
+begin
+	Result := ReplicatedFieldVTable(vTable).getType(Self);
+end;
+
+function IReplicatedField.getSubType(): Cardinal;
+begin
+	Result := ReplicatedFieldVTable(vTable).getSubType(Self);
+end;
+
+function IReplicatedField.getScale(): Cardinal;
+begin
+	Result := ReplicatedFieldVTable(vTable).getScale(Self);
+end;
+
+function IReplicatedField.getLength(): Cardinal;
+begin
+	Result := ReplicatedFieldVTable(vTable).getLength(Self);
+end;
+
+function IReplicatedField.getCharSet(): Cardinal;
+begin
+	Result := ReplicatedFieldVTable(vTable).getCharSet(Self);
+end;
+
+function IReplicatedField.getData(): Pointer;
+begin
+	Result := ReplicatedFieldVTable(vTable).getData(Self);
+end;
+
+function IReplicatedRecord.getCount(): Cardinal;
+begin
+	Result := ReplicatedRecordVTable(vTable).getCount(Self);
+end;
+
+function IReplicatedRecord.getField(index: Cardinal): IReplicatedField;
+begin
+	Result := ReplicatedRecordVTable(vTable).getField(Self, index);
+end;
+
 function IReplicatedRecord.getRawLength(): Cardinal;
 begin
 	Result := ReplicatedRecordVTable(vTable).getRawLength(Self);
@@ -8106,21 +8179,6 @@ end;
 function IReplicatedRecord.getRawData(): BytePtr;
 begin
 	Result := ReplicatedRecordVTable(vTable).getRawData(Self);
-end;
-
-function IReplicatedBlob.getLength(): Cardinal;
-begin
-	Result := ReplicatedBlobVTable(vTable).getLength(Self);
-end;
-
-function IReplicatedBlob.isEof(): Boolean;
-begin
-	Result := ReplicatedBlobVTable(vTable).isEof(Self);
-end;
-
-function IReplicatedBlob.getSegment(length: Cardinal; buffer: BytePtr): Cardinal;
-begin
-	Result := ReplicatedBlobVTable(vTable).getSegment(Self, length, buffer);
 end;
 
 function IReplicatedTransaction.prepare(): Boolean;
@@ -8168,11 +8226,6 @@ begin
 	Result := ReplicatedTransactionVTable(vTable).deleteRecord(Self, name, record_);
 end;
 
-function IReplicatedTransaction.storeBlob(blobId: ISC_QUAD; blob: IReplicatedBlob): Boolean;
-begin
-	Result := ReplicatedTransactionVTable(vTable).storeBlob(Self, blobId, blob);
-end;
-
 function IReplicatedTransaction.executeSql(sql: PAnsiChar): Boolean;
 begin
 	Result := ReplicatedTransactionVTable(vTable).executeSql(Self, sql);
@@ -8188,9 +8241,14 @@ begin
 	Result := ReplicatedSessionVTable(vTable).getStatus(Self);
 end;
 
-function IReplicatedSession.startTransaction(number: Int64): IReplicatedTransaction;
+procedure IReplicatedSession.setAttachment(attachment: IAttachment);
 begin
-	Result := ReplicatedSessionVTable(vTable).startTransaction(Self, number);
+	ReplicatedSessionVTable(vTable).setAttachment(Self, attachment);
+end;
+
+function IReplicatedSession.startTransaction(transaction: ITransaction; number: Int64): IReplicatedTransaction;
+begin
+	Result := ReplicatedSessionVTable(vTable).startTransaction(Self, transaction, number);
 end;
 
 function IReplicatedSession.cleanupTransaction(number: Int64): Boolean;
@@ -14232,6 +14290,95 @@ begin
 	vTable := IInt128Impl_vTable;
 end;
 
+function IReplicatedFieldImpl_getNameDispatcher(this: IReplicatedField): PAnsiChar; cdecl;
+begin
+	try
+		Result := IReplicatedFieldImpl(this).getName();
+	except
+		on e: Exception do FbException.catchException(nil, e);
+	end
+end;
+
+function IReplicatedFieldImpl_getTypeDispatcher(this: IReplicatedField): Cardinal; cdecl;
+begin
+	try
+		Result := IReplicatedFieldImpl(this).getType();
+	except
+		on e: Exception do FbException.catchException(nil, e);
+	end
+end;
+
+function IReplicatedFieldImpl_getSubTypeDispatcher(this: IReplicatedField): Cardinal; cdecl;
+begin
+	try
+		Result := IReplicatedFieldImpl(this).getSubType();
+	except
+		on e: Exception do FbException.catchException(nil, e);
+	end
+end;
+
+function IReplicatedFieldImpl_getScaleDispatcher(this: IReplicatedField): Cardinal; cdecl;
+begin
+	try
+		Result := IReplicatedFieldImpl(this).getScale();
+	except
+		on e: Exception do FbException.catchException(nil, e);
+	end
+end;
+
+function IReplicatedFieldImpl_getLengthDispatcher(this: IReplicatedField): Cardinal; cdecl;
+begin
+	try
+		Result := IReplicatedFieldImpl(this).getLength();
+	except
+		on e: Exception do FbException.catchException(nil, e);
+	end
+end;
+
+function IReplicatedFieldImpl_getCharSetDispatcher(this: IReplicatedField): Cardinal; cdecl;
+begin
+	try
+		Result := IReplicatedFieldImpl(this).getCharSet();
+	except
+		on e: Exception do FbException.catchException(nil, e);
+	end
+end;
+
+function IReplicatedFieldImpl_getDataDispatcher(this: IReplicatedField): Pointer; cdecl;
+begin
+	try
+		Result := IReplicatedFieldImpl(this).getData();
+	except
+		on e: Exception do FbException.catchException(nil, e);
+	end
+end;
+
+var
+	IReplicatedFieldImpl_vTable: ReplicatedFieldVTable;
+
+constructor IReplicatedFieldImpl.create;
+begin
+	vTable := IReplicatedFieldImpl_vTable;
+end;
+
+function IReplicatedRecordImpl_getCountDispatcher(this: IReplicatedRecord): Cardinal; cdecl;
+begin
+	try
+		Result := IReplicatedRecordImpl(this).getCount();
+	except
+		on e: Exception do FbException.catchException(nil, e);
+	end
+end;
+
+function IReplicatedRecordImpl_getFieldDispatcher(this: IReplicatedRecord; index: Cardinal): IReplicatedField; cdecl;
+begin
+	try
+		Result := IReplicatedRecordImpl(this).getField(index);
+	except
+		on e: Exception do FbException.catchException(nil, e);
+	end
+end;
+
 function IReplicatedRecordImpl_getRawLengthDispatcher(this: IReplicatedRecord): Cardinal; cdecl;
 begin
 	try
@@ -14256,41 +14403,6 @@ var
 constructor IReplicatedRecordImpl.create;
 begin
 	vTable := IReplicatedRecordImpl_vTable;
-end;
-
-function IReplicatedBlobImpl_getLengthDispatcher(this: IReplicatedBlob): Cardinal; cdecl;
-begin
-	try
-		Result := IReplicatedBlobImpl(this).getLength();
-	except
-		on e: Exception do FbException.catchException(nil, e);
-	end
-end;
-
-function IReplicatedBlobImpl_isEofDispatcher(this: IReplicatedBlob): Boolean; cdecl;
-begin
-	try
-		Result := IReplicatedBlobImpl(this).isEof();
-	except
-		on e: Exception do FbException.catchException(nil, e);
-	end
-end;
-
-function IReplicatedBlobImpl_getSegmentDispatcher(this: IReplicatedBlob; length: Cardinal; buffer: BytePtr): Cardinal; cdecl;
-begin
-	try
-		Result := IReplicatedBlobImpl(this).getSegment(length, buffer);
-	except
-		on e: Exception do FbException.catchException(nil, e);
-	end
-end;
-
-var
-	IReplicatedBlobImpl_vTable: ReplicatedBlobVTable;
-
-constructor IReplicatedBlobImpl.create;
-begin
-	vTable := IReplicatedBlobImpl_vTable;
 end;
 
 procedure IReplicatedTransactionImpl_disposeDispatcher(this: IReplicatedTransaction); cdecl;
@@ -14383,15 +14495,6 @@ begin
 	end
 end;
 
-function IReplicatedTransactionImpl_storeBlobDispatcher(this: IReplicatedTransaction; blobId: ISC_QUAD; blob: IReplicatedBlob): Boolean; cdecl;
-begin
-	try
-		Result := IReplicatedTransactionImpl(this).storeBlob(blobId, blob);
-	except
-		on e: Exception do FbException.catchException(nil, e);
-	end
-end;
-
 function IReplicatedTransactionImpl_executeSqlDispatcher(this: IReplicatedTransaction; sql: PAnsiChar): Boolean; cdecl;
 begin
 	try
@@ -14418,10 +14521,37 @@ begin
 	vTable := IReplicatedTransactionImpl_vTable;
 end;
 
-procedure IReplicatedSessionImpl_disposeDispatcher(this: IReplicatedSession); cdecl;
+procedure IReplicatedSessionImpl_addRefDispatcher(this: IReplicatedSession); cdecl;
 begin
 	try
-		IReplicatedSessionImpl(this).dispose();
+		IReplicatedSessionImpl(this).addRef();
+	except
+		on e: Exception do FbException.catchException(nil, e);
+	end
+end;
+
+function IReplicatedSessionImpl_releaseDispatcher(this: IReplicatedSession): Integer; cdecl;
+begin
+	try
+		Result := IReplicatedSessionImpl(this).release();
+	except
+		on e: Exception do FbException.catchException(nil, e);
+	end
+end;
+
+procedure IReplicatedSessionImpl_setOwnerDispatcher(this: IReplicatedSession; r: IReferenceCounted); cdecl;
+begin
+	try
+		IReplicatedSessionImpl(this).setOwner(r);
+	except
+		on e: Exception do FbException.catchException(nil, e);
+	end
+end;
+
+function IReplicatedSessionImpl_getOwnerDispatcher(this: IReplicatedSession): IReferenceCounted; cdecl;
+begin
+	try
+		Result := IReplicatedSessionImpl(this).getOwner();
 	except
 		on e: Exception do FbException.catchException(nil, e);
 	end
@@ -14436,10 +14566,19 @@ begin
 	end
 end;
 
-function IReplicatedSessionImpl_startTransactionDispatcher(this: IReplicatedSession; number: Int64): IReplicatedTransaction; cdecl;
+procedure IReplicatedSessionImpl_setAttachmentDispatcher(this: IReplicatedSession; attachment: IAttachment); cdecl;
 begin
 	try
-		Result := IReplicatedSessionImpl(this).startTransaction(number);
+		IReplicatedSessionImpl(this).setAttachment(attachment);
+	except
+		on e: Exception do FbException.catchException(nil, e);
+	end
+end;
+
+function IReplicatedSessionImpl_startTransactionDispatcher(this: IReplicatedSession; transaction: ITransaction; number: Int64): IReplicatedTransaction; cdecl;
+begin
+	try
+		Result := IReplicatedSessionImpl(this).startTransaction(transaction, number);
 	except
 		on e: Exception do FbException.catchException(nil, e);
 	end
@@ -15377,16 +15516,22 @@ initialization
 	IInt128Impl_vTable.toString := @IInt128Impl_toStringDispatcher;
 	IInt128Impl_vTable.fromString := @IInt128Impl_fromStringDispatcher;
 
+	IReplicatedFieldImpl_vTable := ReplicatedFieldVTable.create;
+	IReplicatedFieldImpl_vTable.version := 2;
+	IReplicatedFieldImpl_vTable.getName := @IReplicatedFieldImpl_getNameDispatcher;
+	IReplicatedFieldImpl_vTable.getType := @IReplicatedFieldImpl_getTypeDispatcher;
+	IReplicatedFieldImpl_vTable.getSubType := @IReplicatedFieldImpl_getSubTypeDispatcher;
+	IReplicatedFieldImpl_vTable.getScale := @IReplicatedFieldImpl_getScaleDispatcher;
+	IReplicatedFieldImpl_vTable.getLength := @IReplicatedFieldImpl_getLengthDispatcher;
+	IReplicatedFieldImpl_vTable.getCharSet := @IReplicatedFieldImpl_getCharSetDispatcher;
+	IReplicatedFieldImpl_vTable.getData := @IReplicatedFieldImpl_getDataDispatcher;
+
 	IReplicatedRecordImpl_vTable := ReplicatedRecordVTable.create;
 	IReplicatedRecordImpl_vTable.version := 2;
+	IReplicatedRecordImpl_vTable.getCount := @IReplicatedRecordImpl_getCountDispatcher;
+	IReplicatedRecordImpl_vTable.getField := @IReplicatedRecordImpl_getFieldDispatcher;
 	IReplicatedRecordImpl_vTable.getRawLength := @IReplicatedRecordImpl_getRawLengthDispatcher;
 	IReplicatedRecordImpl_vTable.getRawData := @IReplicatedRecordImpl_getRawDataDispatcher;
-
-	IReplicatedBlobImpl_vTable := ReplicatedBlobVTable.create;
-	IReplicatedBlobImpl_vTable.version := 2;
-	IReplicatedBlobImpl_vTable.getLength := @IReplicatedBlobImpl_getLengthDispatcher;
-	IReplicatedBlobImpl_vTable.isEof := @IReplicatedBlobImpl_isEofDispatcher;
-	IReplicatedBlobImpl_vTable.getSegment := @IReplicatedBlobImpl_getSegmentDispatcher;
 
 	IReplicatedTransactionImpl_vTable := ReplicatedTransactionVTable.create;
 	IReplicatedTransactionImpl_vTable.version := 3;
@@ -15400,14 +15545,17 @@ initialization
 	IReplicatedTransactionImpl_vTable.insertRecord := @IReplicatedTransactionImpl_insertRecordDispatcher;
 	IReplicatedTransactionImpl_vTable.updateRecord := @IReplicatedTransactionImpl_updateRecordDispatcher;
 	IReplicatedTransactionImpl_vTable.deleteRecord := @IReplicatedTransactionImpl_deleteRecordDispatcher;
-	IReplicatedTransactionImpl_vTable.storeBlob := @IReplicatedTransactionImpl_storeBlobDispatcher;
 	IReplicatedTransactionImpl_vTable.executeSql := @IReplicatedTransactionImpl_executeSqlDispatcher;
 	IReplicatedTransactionImpl_vTable.executeSqlIntl := @IReplicatedTransactionImpl_executeSqlIntlDispatcher;
 
 	IReplicatedSessionImpl_vTable := ReplicatedSessionVTable.create;
-	IReplicatedSessionImpl_vTable.version := 3;
-	IReplicatedSessionImpl_vTable.dispose := @IReplicatedSessionImpl_disposeDispatcher;
+	IReplicatedSessionImpl_vTable.version := 4;
+	IReplicatedSessionImpl_vTable.addRef := @IReplicatedSessionImpl_addRefDispatcher;
+	IReplicatedSessionImpl_vTable.release := @IReplicatedSessionImpl_releaseDispatcher;
+	IReplicatedSessionImpl_vTable.setOwner := @IReplicatedSessionImpl_setOwnerDispatcher;
+	IReplicatedSessionImpl_vTable.getOwner := @IReplicatedSessionImpl_getOwnerDispatcher;
 	IReplicatedSessionImpl_vTable.getStatus := @IReplicatedSessionImpl_getStatusDispatcher;
+	IReplicatedSessionImpl_vTable.setAttachment := @IReplicatedSessionImpl_setAttachmentDispatcher;
 	IReplicatedSessionImpl_vTable.startTransaction := @IReplicatedSessionImpl_startTransactionDispatcher;
 	IReplicatedSessionImpl_vTable.cleanupTransaction := @IReplicatedSessionImpl_cleanupTransactionDispatcher;
 	IReplicatedSessionImpl_vTable.setSequence := @IReplicatedSessionImpl_setSequenceDispatcher;
@@ -15504,8 +15652,8 @@ finalization
 	IDecFloat16Impl_vTable.destroy;
 	IDecFloat34Impl_vTable.destroy;
 	IInt128Impl_vTable.destroy;
+	IReplicatedFieldImpl_vTable.destroy;
 	IReplicatedRecordImpl_vTable.destroy;
-	IReplicatedBlobImpl_vTable.destroy;
 	IReplicatedTransactionImpl_vTable.destroy;
 	IReplicatedSessionImpl_vTable.destroy;
 

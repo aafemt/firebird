@@ -71,12 +71,6 @@ namespace Replication
 				const Replication::Config* config);
 		~Manager();
 
-		TableMatcher* createTableMatcher(MemoryPool& pool)
-		{
-			return FB_NEW_POOL(pool)
-				TableMatcher(pool, m_config->includeFilter, m_config->excludeFilter);
-		}
-
 		Firebird::UCharBuffer* getBuffer();
 		void releaseBuffer(Firebird::UCharBuffer* buffer);
 

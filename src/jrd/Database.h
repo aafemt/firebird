@@ -303,7 +303,11 @@ class Database : public pool_alloc<type_dbb>
 
 		LockManager* getLockManager();
 		EventManager* getEventManager();
-		Replication::Manager* getReplManager();
+		Replication::Manager* getReplManager(bool create);
+		const Replication::Config* getReplConfig()
+		{
+			return m_replConfig.get();
+		}
 
 	private:
 		const Firebird::string m_id;
@@ -657,9 +661,14 @@ public:
 		return dbb_gblobj_holder->getEventManager();
 	}
 
-	Replication::Manager* replManager()
+	Replication::Manager* replManager(bool create = false)
 	{
-		return dbb_gblobj_holder->getReplManager();
+		return dbb_gblobj_holder->getReplManager(create);
+	}
+
+	const Replication::Config* replConfig()
+	{
+		return dbb_gblobj_holder->getReplConfig();
 	}
 
 private:

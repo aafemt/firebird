@@ -7410,8 +7410,7 @@ void release_attachment(thread_db* tdbb, Jrd::Attachment* attachment)
 	if (!attachment)
 		return;
 
-	if (attachment->att_replicator)
-		attachment->att_replicator->dispose();
+	attachment->att_replicator = nullptr;
 
 	if (attachment->att_repl_applier)
 		attachment->att_repl_applier->shutdown(tdbb);

@@ -99,7 +99,8 @@ Config::Config()
 	  logSourceDirectory(getPool()),
 	  verboseLogging(false),
 	  applyIdleTimeout(DEFAULT_APPLY_IDLE_TIMEOUT),
-	  applyErrorTimeout(DEFAULT_APPLY_ERROR_TIMEOUT)
+	  applyErrorTimeout(DEFAULT_APPLY_ERROR_TIMEOUT),
+	  pluginName(getPool())
 {
 	sourceGuid.alignment = 0;
 }
@@ -121,7 +122,8 @@ Config::Config(const Config& other)
 	  logSourceDirectory(getPool(), other.logSourceDirectory),
 	  verboseLogging(other.verboseLogging),
 	  applyIdleTimeout(other.applyIdleTimeout),
-	  applyErrorTimeout(other.applyErrorTimeout)
+	  applyErrorTimeout(other.applyErrorTimeout),
+	  pluginName(other.pluginName)
 {
 	sourceGuid.alignment = 0;
 }
@@ -165,6 +167,8 @@ Config* Config::get(const PathName& lookupName)
 
 			if (dbName != lookupName)
 				continue;
+
+			config->dbName = dbName;
 
 			exactMatch = true;
 		}
@@ -232,27 +236,36 @@ Config* Config::get(const PathName& lookupName)
 				{
 					parseLong(value, config->logArchiveTimeout);
 				}
+				else if (key == "plugin")
+				{
+					config->pluginName = value;
+				}
 			}
 		}
 
-		if (!exactMatch)
-			continue;
+		if (exactMatch)
+			break;
 
-		if (config->logDirectory.hasData() || config->syncReplicas.hasData())
+	}
+
+	// TODO: As soon as plugin name is moved into RDB$PUBLICATIONS delay config parse until real replication start
+	if (config->pluginName.hasData())
+	{
+		return config.release();
+	}
+
+	if (config->logDirectory.hasData() || config->syncReplicas.hasData())
+	{
+		// If log_directory is specified, then replication is enabled
+
+		if (config->logFilePrefix.isEmpty())
 		{
-			// If log_directory is specified, then replication is enabled
-
-			if (config->logFilePrefix.isEmpty())
-			{
-				PathName db_directory, db_filename;
-				PathUtils::splitLastComponent(db_directory, db_filename, dbName);
-				config->logFilePrefix = db_filename;
-			}
-
-			config->dbName = dbName;
-
-			return config.release();
+			PathName db_directory, db_filename;
+			PathUtils::splitLastComponent(db_directory, db_filename, config->dbName);
+			config->logFilePrefix = db_filename;
 		}
+
+		return config.release();
 	}
 
 	return NULL;

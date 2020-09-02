@@ -22,6 +22,7 @@
 
 #include "firebird.h"
 #include "../jrd/jrd.h"
+#include "../../common/classes/BlobWrapper.h"
 
 #include "Config.h"
 #include "Replicator.h"
@@ -35,10 +36,8 @@ using namespace Replication;
 Replicator::Replicator(MemoryPool& pool,
 					   Manager* manager,
 					   const Guid& guid,
-					   const MetaString& user,
-					   bool cleanupTransactions)
-	: PermanentStorage(pool),
-	  m_manager(manager),
+					   const MetaString& user)
+	: m_manager(manager),
 	  m_config(manager->getConfig()),
 	  m_guid(guid),
 	  m_user(user),
@@ -46,8 +45,6 @@ Replicator::Replicator(MemoryPool& pool,
 	  m_generators(pool),
 	  m_status(pool)
 {
-	if (cleanupTransactions)
-		cleanupTransaction(0);
 }
 
 void Replicator::flush(BatchBlock& block, FlushReason reason, ULONG flags)
@@ -121,7 +118,7 @@ void Replicator::postError(const Exception& ex)
 
 // IReplicatedSession implementation
 
-IReplicatedTransaction* Replicator::startTransaction(SINT64 number)
+IReplicatedTransaction* Replicator::startTransaction(ITransaction* trans, SINT64 number)
 {
 	AutoPtr<Transaction> transaction;
 
@@ -130,7 +127,7 @@ IReplicatedTransaction* Replicator::startTransaction(SINT64 number)
 		MutexLockGuard guard(m_mutex, FB_FUNCTION);
 
 		MemoryPool& pool = getPool();
-		transaction = FB_NEW_POOL(pool) Transaction(this);
+		transaction = FB_NEW_POOL(pool) Transaction(this, trans);
 		m_transactions.add(transaction);
 
 		auto& txnData = transaction->getData();
@@ -258,7 +255,7 @@ void Replicator::releaseTransaction(Transaction* transaction)
 		if (m_transactions.find(transaction, pos))
 			m_transactions.remove(pos);
 	}
-	catch (const Exception& ex)
+	catch (const Exception&)
 	{} // no-op
 }
 
@@ -333,6 +330,27 @@ bool Replicator::insertRecord(Transaction* transaction,
 {
 	try
 	{
+		for (unsigned id = 0; id < record->getCount(); id++)
+		{
+			IReplicatedField* field = record->getField(id);
+			if (field != nullptr)
+			{
+				auto type = field->getType();
+				if (type == SQL_ARRAY || type == SQL_BLOB)
+				{
+					const auto blobId = (ISC_QUAD*) field->getData();
+
+					if (blobId != nullptr)
+					{
+						if (!storeBlob(transaction, *blobId))
+						{
+							return false;
+						}
+					}
+				}
+			}
+		}
+
 		MutexLockGuard guard(m_mutex, FB_FUNCTION);
 
 		const auto length = record->getRawLength();
@@ -363,6 +381,27 @@ bool Replicator::updateRecord(Transaction* transaction,
 {
 	try
 	{
+		for (unsigned id = 0; id < newRecord->getCount(); id++)
+		{
+			IReplicatedField* field = newRecord->getField(id);
+			if (field != nullptr)
+			{
+				auto type = field->getType();
+				if (type == SQL_ARRAY || type == SQL_BLOB)
+				{
+					const auto blobId = (ISC_QUAD*) field->getData();
+
+					if (blobId != nullptr)
+					{
+						if (!storeBlob(transaction, *blobId))
+						{
+							return false;
+						}
+					}
+				}
+			}
+		}
+
 		MutexLockGuard guard(m_mutex, FB_FUNCTION);
 
 		const auto orgLength = orgRecord->getRawLength();
@@ -420,12 +459,17 @@ bool Replicator::deleteRecord(Transaction* transaction,
 }
 
 bool Replicator::storeBlob(Transaction* transaction,
-						   ISC_QUAD blobId,
-						   IReplicatedBlob* blob)
+						   ISC_QUAD blobId)
 {
 	try
 	{
 		MutexLockGuard guard(m_mutex, FB_FUNCTION);
+
+		BlobWrapper blob(&m_status);
+		if (!blob.open(m_attachment, transaction->getInterface(), blobId))
+		{
+			return false;
+		}
 
 		UCharBuffer buffer;
 		const auto bufferLength = MAX_USHORT;
@@ -434,12 +478,11 @@ bool Replicator::storeBlob(Transaction* transaction,
 		auto& txnData = transaction->getData();
 		bool newOp = true;
 
-		while (!blob->isEof())
+		FB_SIZE_T segmentLength;
+		while (blob.getSegment(bufferLength, data, segmentLength))
 		{
-			const auto segmentLength = blob->getSegment(bufferLength, data);
-
 			if (!segmentLength)
-				break;
+				continue; // Zero-length segments are unusual but ok.
 
 			if (newOp)
 			{
@@ -457,6 +500,11 @@ bool Replicator::storeBlob(Transaction* transaction,
 				newOp = true;
 			}
 		}
+
+		if (m_status->getState() & IStatus::STATE_ERRORS)
+			return false;
+
+		blob.close();
 
 		if (newOp)
 		{

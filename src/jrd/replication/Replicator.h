@@ -36,8 +36,7 @@
 namespace Replication
 {
 	class Replicator :
-		public Firebird::AutoIface<Firebird::IReplicatedSessionImpl<Replicator, Firebird::CheckStatusWrapper> >,
-		private Firebird::PermanentStorage
+		public Firebird::StdPlugin<Firebird::IReplicatedSessionImpl<Replicator, Firebird::CheckStatusWrapper> >
 	{
 		typedef Firebird::Array<Firebird::MetaString> MetadataCache;
 		typedef Firebird::HalfStaticArray<SavNumber, 16> SavepointStack;
@@ -120,13 +119,18 @@ namespace Replication
 			public Firebird::AutoIface<Firebird::IReplicatedTransactionImpl<Transaction, Firebird::CheckStatusWrapper> >
 		{
 		public:
-			explicit Transaction(Replicator* replicator)
-				: m_replicator(replicator), m_data(replicator->getPool())
+			explicit Transaction(Replicator* replicator, Firebird::ITransaction* trans)
+				: m_replicator(replicator), m_transaction(trans), m_data(replicator->getPool())
 			{}
 
 			BatchBlock& getData()
 			{
 				return m_data;
+			}
+
+			Firebird::ITransaction* getInterface()
+			{
+				return m_transaction.getPtr();
 			}
 
 			// IDisposable methods
@@ -184,11 +188,6 @@ namespace Replication
 				return m_replicator->deleteRecord(this, name, record) ? FB_TRUE : FB_FALSE;
 			}
 
-			FB_BOOLEAN storeBlob(ISC_QUAD blobId, Firebird::IReplicatedBlob* blob)
-			{
-				return m_replicator->storeBlob(this, blobId, blob) ? FB_TRUE : FB_FALSE;
-			}
-
 			FB_BOOLEAN executeSql(const char* sql)
 			{
 				return m_replicator->executeSql(this, sql) ? FB_TRUE : FB_FALSE;
@@ -201,6 +200,7 @@ namespace Replication
 
 		private:
 			Replicator* const m_replicator;
+			Firebird::RefPtr<Firebird::ITransaction> m_transaction;
 			BatchBlock m_data;
 		};
 
@@ -223,14 +223,17 @@ namespace Replication
 		Replicator(Firebird::MemoryPool& pool,
 				   Manager* manager,
 				   const Firebird::Guid& dbGuid,
-				   const Firebird::MetaString& userName,
-				   bool cleanupTransactions);
+				   const Firebird::MetaString& userName);
 
-		// IDisposable methods
-
-		void dispose()
+		// IReferenceCounted methods
+		int release()
 		{
-			delete this;
+			if (--refCounter == 0)
+			{
+				delete this;
+				return 0;
+			}
+			return 1;
 		}
 
 		// IReplicatedSession methods
@@ -240,7 +243,11 @@ namespace Replication
 			return &m_status;
 		}
 
-		Firebird::IReplicatedTransaction* startTransaction(SINT64 number);
+		void setAttachment(Firebird::IAttachment* att) override
+		{
+			m_attachment = att;
+		}
+		Firebird::IReplicatedTransaction* startTransaction(Firebird::ITransaction* trans, SINT64 number) override;
 		FB_BOOLEAN cleanupTransaction(SINT64 number);
 		FB_BOOLEAN setSequence(const char* name, SINT64 value);
 
@@ -253,6 +260,7 @@ namespace Replication
 		GeneratorCache m_generators;
 		Firebird::Mutex m_mutex;
 		Firebird::FbLocalStatus m_status;
+		Firebird::RefPtr<Firebird::IAttachment> m_attachment;
 
 		void initialize();
 		void flush(BatchBlock& txnData, FlushReason reason, ULONG flags = 0);
@@ -279,9 +287,9 @@ namespace Replication
 						  const char* name,
 						  Firebird::IReplicatedRecord* record);
 
+		// Blob id is passed by value because BlobWrapper requires reference to non-const ISC_QUAD
 		bool storeBlob(Transaction* transaction,
-					   ISC_QUAD blobId,
-					   Firebird::IReplicatedBlob* blob);
+					   ISC_QUAD blobId);
 
 		bool executeSql(Transaction* transaction,
 						const char* sql)
