@@ -411,7 +411,7 @@ void REPL_trans_cleanup(Jrd::thread_db* tdbb, TraNumber number)
 void REPL_save_cleanup(thread_db* tdbb, jrd_tra* transaction,
 				  	   const Savepoint* savepoint, bool undo)
 {
-	if (tdbb->tdbb_flags & (TDBB_dont_post_dfw | TDBB_repl_sql))
+	if (tdbb->tdbb_flags & (TDBB_dont_post_dfw | TDBB_repl_in_progress))
 		return;
 
 	if (!transaction->tra_save_point->isReplicated())
@@ -435,7 +435,7 @@ void REPL_save_cleanup(thread_db* tdbb, jrd_tra* transaction,
 
 void REPL_store(thread_db* tdbb, const record_param* rpb, jrd_tra* transaction)
 {
-	if (tdbb->tdbb_flags & (TDBB_dont_post_dfw | TDBB_repl_sql))
+	if (tdbb->tdbb_flags & (TDBB_dont_post_dfw | TDBB_repl_in_progress))
 		return;
 
 	const auto relation = rpb->rpb_relation;
@@ -462,7 +462,7 @@ void REPL_store(thread_db* tdbb, const record_param* rpb, jrd_tra* transaction)
 
 	// This temporary auto-pointer is just to delete a temporary record
 	AutoPtr<Record> cleanupRecord(record != rpb->rpb_record ? record : NULL);
-	AutoSetRestoreFlag<ULONG> noRecursion(&tdbb->tdbb_flags, TDBB_repl_sql, true);
+	AutoSetRestoreFlag<ULONG> noRecursion(&tdbb->tdbb_flags, TDBB_repl_in_progress, true);
 
 	if (!ensureSavepoints(tdbb, transaction))
 		return;
@@ -476,7 +476,7 @@ void REPL_store(thread_db* tdbb, const record_param* rpb, jrd_tra* transaction)
 void REPL_modify(thread_db* tdbb, const record_param* orgRpb,
 				 const record_param* newRpb, jrd_tra* transaction)
 {
-	if (tdbb->tdbb_flags & (TDBB_dont_post_dfw | TDBB_repl_sql))
+	if (tdbb->tdbb_flags & (TDBB_dont_post_dfw | TDBB_repl_in_progress))
 		return;
 
 	const auto relation = newRpb->rpb_relation;
@@ -518,7 +518,7 @@ void REPL_modify(thread_db* tdbb, const record_param* orgRpb,
 		return;
 	}
 
-	AutoSetRestoreFlag<ULONG> noRecursion(&tdbb->tdbb_flags, TDBB_repl_sql, true);
+	AutoSetRestoreFlag<ULONG> noRecursion(&tdbb->tdbb_flags, TDBB_repl_in_progress, true);
 
 	if (!ensureSavepoints(tdbb, transaction))
 		return;
@@ -533,7 +533,7 @@ void REPL_modify(thread_db* tdbb, const record_param* orgRpb,
 
 void REPL_erase(thread_db* tdbb, const record_param* rpb, jrd_tra* transaction)
 {
-	if (tdbb->tdbb_flags & (TDBB_dont_post_dfw | TDBB_repl_sql))
+	if (tdbb->tdbb_flags & (TDBB_dont_post_dfw | TDBB_repl_in_progress))
 		return;
 
 	const auto relation = rpb->rpb_relation;
@@ -560,7 +560,7 @@ void REPL_erase(thread_db* tdbb, const record_param* rpb, jrd_tra* transaction)
 
 	// This temporary auto-pointer is just to delete a temporary record
 	AutoPtr<Record> cleanupRecord(record != rpb->rpb_record ? record : NULL);
-	AutoSetRestoreFlag<ULONG> noRecursion(&tdbb->tdbb_flags, TDBB_repl_sql, true);
+	AutoSetRestoreFlag<ULONG> noRecursion(&tdbb->tdbb_flags, TDBB_repl_in_progress, true);
 
 	if (!ensureSavepoints(tdbb, transaction))
 		return;
@@ -573,7 +573,7 @@ void REPL_erase(thread_db* tdbb, const record_param* rpb, jrd_tra* transaction)
 
 void REPL_gen_id(thread_db* tdbb, SLONG genId, SINT64 value)
 {
-	if (tdbb->tdbb_flags & (TDBB_dont_post_dfw | TDBB_repl_sql))
+	if (tdbb->tdbb_flags & (TDBB_dont_post_dfw | TDBB_repl_in_progress))
 		return;
 
 	if (genId == 0) // special case: ignore RDB$GENERATORS
@@ -602,7 +602,7 @@ void REPL_gen_id(thread_db* tdbb, SLONG genId, SINT64 value)
 		attachment->att_generators.store(genId, genName);
 	}
 
-	AutoSetRestoreFlag<ULONG> noRecursion(&tdbb->tdbb_flags, TDBB_repl_sql, true);
+	AutoSetRestoreFlag<ULONG> noRecursion(&tdbb->tdbb_flags, TDBB_repl_in_progress, true);
 
 	if (!replicator->setSequence(genName.c_str(), value))
 		handleError(tdbb);
@@ -610,7 +610,7 @@ void REPL_gen_id(thread_db* tdbb, SLONG genId, SINT64 value)
 
 void REPL_exec_sql(thread_db* tdbb, jrd_tra* transaction, const string& sql)
 {
-	fb_assert(tdbb->tdbb_flags & TDBB_repl_sql);
+	fb_assert(tdbb->tdbb_flags & TDBB_repl_in_progress);
 
 	if (tdbb->tdbb_flags & TDBB_dont_post_dfw)
 		return;

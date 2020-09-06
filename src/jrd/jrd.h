@@ -489,7 +489,7 @@ const ULONG TDBB_wait_cancel_disable	= 512;		// don't cancel current waiting ope
 const ULONG TDBB_cache_unwound			= 1024;		// page cache was unwound
 const ULONG TDBB_reset_stack			= 2048;		// stack should be reset after stack overflow exception
 const ULONG TDBB_dfw_cleanup			= 4096;		// DFW cleanup phase is active
-const ULONG TDBB_repl_sql				= 8192;	// SQL statement is being replicated
+const ULONG TDBB_repl_in_progress		= 8192;		// Prevent recursion in replication
 const ULONG TDBB_replicator				= 16384;	// Replicator
 
 class thread_db : public Firebird::ThreadData
