@@ -100,7 +100,10 @@ Config::Config()
 	  verboseLogging(false),
 	  applyIdleTimeout(DEFAULT_APPLY_IDLE_TIMEOUT),
 	  applyErrorTimeout(DEFAULT_APPLY_ERROR_TIMEOUT),
-	  pluginName(getPool())
+	  pluginName(getPool()),
+	  log_on_error(true),
+	  disable_on_error(true),
+	  throw_on_error(false)
 {
 	sourceGuid.alignment = 0;
 }
@@ -123,7 +126,10 @@ Config::Config(const Config& other)
 	  verboseLogging(other.verboseLogging),
 	  applyIdleTimeout(other.applyIdleTimeout),
 	  applyErrorTimeout(other.applyErrorTimeout),
-	  pluginName(other.pluginName)
+	  pluginName(other.pluginName),
+	  log_on_error(other.log_on_error),
+	  disable_on_error(other.disable_on_error),
+	  throw_on_error(other.throw_on_error)
 {
 	sourceGuid.alignment = 0;
 }
@@ -239,6 +245,18 @@ Config* Config::get(const PathName& lookupName)
 				else if (key == "plugin")
 				{
 					config->pluginName = value;
+				}
+				else if (key == "log_on_error")
+				{
+					parseBoolean(value, config->log_on_error);
+				}
+				else if (key == "disable_on_error")
+				{
+					parseBoolean(value, config->disable_on_error);
+				}
+				else if (key == "throw_on_error")
+				{
+					parseBoolean(value, config->throw_on_error);
 				}
 			}
 		}

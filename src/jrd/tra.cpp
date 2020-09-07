@@ -1295,7 +1295,10 @@ void TRA_release_transaction(thread_db* tdbb, jrd_tra* transaction, Jrd::TraceTr
 	// Destroy the replicated transaction reference
 
 	if (transaction->tra_replicator)
+	{
 		transaction->tra_replicator->dispose();
+		transaction->tra_replicator = nullptr;
+	}
 
 	// Release transaction's under-modification-rpb list
 

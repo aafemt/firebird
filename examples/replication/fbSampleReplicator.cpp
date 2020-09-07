@@ -116,6 +116,8 @@ extern "C"
 
 static std::atomic_int logCounter;
 
+static const ISC_STATUS err[] = { isc_arg_gds, isc_random, isc_arg_string, (ISC_STATUS)"Intolerable integer value", isc_arg_end };
+
 ReplPlugin::ReplPlugin(IPluginConfig* conf)
 {
 	char fn[100];
@@ -321,7 +323,10 @@ bool ReplTransaction::dumpData(IReplicatedRecord* record)
 				}
 			case SQL_LONG:
 				{
-					WriteLog(parent->log, "\t\tINTEGER with scale %u: %d\n", field->getScale(), *reinterpret_cast<const int32_t*>(fieldData));
+					int value = *reinterpret_cast<const int32_t*>(fieldData);
+					WriteLog(parent->log, "\t\tINTEGER with scale %u: %d\n", field->getScale(), value);
+					if (value == 666)
+						throw value;
 					break;
 				}
 			case SQL_ARRAY:
@@ -453,23 +458,47 @@ bool ReplTransaction::dumpData(IReplicatedRecord* record)
 FB_BOOLEAN ReplTransaction::insertRecord(const char* name, IReplicatedRecord* record)
 {
 	WriteLog(parent->log, "%p\tInsert record into %s\n", this, name);
-	return dumpData(record) ? FB_TRUE : FB_FALSE;
+	try
+	{
+		return dumpData(record) ? FB_TRUE : FB_FALSE;
+	}
+	catch (const int)
+	{
+		parent->status->setErrors(err);
+		return FB_FALSE;
+	}
 }
 
 FB_BOOLEAN ReplTransaction::updateRecord(const char* name, IReplicatedRecord* orgRecord, IReplicatedRecord* newRecord)
 {
 	WriteLog(parent->log, "%p\tUpdate %s\nOldData:\n", this, name);
-	if (!dumpData(orgRecord))
-		return FB_FALSE;
+	try
+	{
+		if (!dumpData(orgRecord))
+			return FB_FALSE;
 
-	WriteLog(parent->log, "NewData:\n");
-	return dumpData(newRecord) ? FB_TRUE : FB_FALSE;
+		WriteLog(parent->log, "NewData:\n");
+		return dumpData(newRecord) ? FB_TRUE : FB_FALSE;
+	}
+	catch (const int)
+	{
+		parent->status->setErrors(err);
+		return FB_FALSE;
+	}
 }
 
 FB_BOOLEAN ReplTransaction::deleteRecord(const char* name, IReplicatedRecord* record)
 {
 	WriteLog(parent->log, "%p\tDelete from %s\n", this, name);
-	return dumpData(record) ? FB_TRUE : FB_FALSE;
+	try
+	{
+		return dumpData(record) ? FB_TRUE : FB_FALSE;
+	}
+	catch (const int)
+	{
+		parent->status->setErrors(err);
+		return FB_FALSE;
+	}
 }
 
 FB_BOOLEAN ReplTransaction::executeSql(const char* sql)

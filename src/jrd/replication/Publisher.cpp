@@ -48,26 +48,36 @@ namespace
 	// should be replicated similar to user-defined ones
 	const int BACKUP_HISTORY_GENERATOR = 9;
 
-	const char* LOG_ERROR_MSG = "Replication is stopped due to critical error(s)";
+	const char* LOG_ERROR_MSG = "Replication encountered an error";
 
- 	void handleError(thread_db* tdbb, jrd_tra* transaction = NULL)
+ 	void handleError(thread_db* tdbb, jrd_tra* transaction = NULL, bool canThrow = true)
 	{
 		const auto dbb = tdbb->getDatabase();
 		const auto attachment = tdbb->getAttachment();
+		const auto config = dbb->replConfig();
 		fb_assert(attachment->att_replicator.hasData());
 
-		if (transaction && transaction->tra_replicator)
+		if (transaction && transaction->tra_replicator && config->disable_on_error)
 		{
 			transaction->tra_replicator->dispose();
 			transaction->tra_replicator = NULL;
+			transaction->tra_flags &= ~TRA_replicating;
 		}
 
 		const auto status = attachment->att_replicator->getStatus();
 		if (status->getState() & IStatus::STATE_ERRORS)
 		{
-			string msg;
-			msg.printf("Database: %s\n\t%s", dbb->dbb_filename.c_str(), LOG_ERROR_MSG);
-			iscLogStatus(msg.c_str(), status);
+			if (config->log_on_error)
+			{
+				string msg;
+				msg.printf("Database: %s\n\t%s", dbb->dbb_filename.c_str(), LOG_ERROR_MSG);
+				iscLogStatus(msg.c_str(), status);
+			}
+
+			if (config->throw_on_error && canThrow)
+			{
+				status_exception::raise(status);
+			}
 		}
 	}
 
@@ -382,8 +392,8 @@ void REPL_trans_commit(thread_db* tdbb, jrd_tra* transaction)
 
 	if (!replicator->commit())
 		handleError(tdbb, transaction);
-
-	transaction->tra_replicator = NULL;
+	else
+		transaction->tra_replicator = nullptr;
 }
 
 void REPL_trans_rollback(thread_db* tdbb, jrd_tra* transaction)
@@ -393,7 +403,13 @@ void REPL_trans_rollback(thread_db* tdbb, jrd_tra* transaction)
 		return;
 
 	if (!replicator->rollback())
-		handleError(tdbb, transaction);
+	{
+		// Rollback is a terminal routine, we cannot throw here
+		handleError(tdbb, transaction, false);
+
+		if (transaction->tra_replicator) // Still alive because of disable_on_error == false
+			transaction->tra_replicator->dispose();
+	}
 
 	transaction->tra_replicator = NULL;
 }
