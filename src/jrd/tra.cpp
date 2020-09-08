@@ -465,6 +465,14 @@ void TRA_commit(thread_db* tdbb, jrd_tra* transaction, const bool retaining_flag
 
 	Jrd::ContextPoolHolder context(tdbb, transaction->tra_pool);
 
+	// Get rid of all user savepoints
+	while (transaction->tra_save_point && !transaction->tra_save_point->isRoot())
+		transaction->rollforwardSavepoint(tdbb);
+
+	// Let replicator perform heavy and error-prone part of work
+
+	REPL_trans_prepare(tdbb, transaction);
+
 	// Perform any meta data work deferred
 
 	if (!(transaction->tra_flags & TRA_prepared))
@@ -495,7 +503,7 @@ void TRA_commit(thread_db* tdbb, jrd_tra* transaction, const bool retaining_flag
 
 	if (transaction->tra_flags & TRA_write)
 	{
-		// Get rid of user savepoints to allow intermediate garbage collection
+		// Get rid of the rest of savepoints to allow intermediate garbage collection
 		// in indices and BLOBs after in-place updates
 		while (transaction->tra_save_point)
 			transaction->rollforwardSavepoint(tdbb);

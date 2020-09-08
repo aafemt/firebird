@@ -391,9 +391,14 @@ void REPL_trans_commit(thread_db* tdbb, jrd_tra* transaction)
 		return;
 
 	if (!replicator->commit())
-		handleError(tdbb, transaction);
-	else
-		transaction->tra_replicator = nullptr;
+	{
+		handleError(tdbb, transaction, false);
+
+		if (transaction->tra_replicator) // Still alive because of disable_on_error == false
+			transaction->tra_replicator->dispose();
+	}
+
+	transaction->tra_replicator = nullptr;
 }
 
 void REPL_trans_rollback(thread_db* tdbb, jrd_tra* transaction)
