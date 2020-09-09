@@ -1590,7 +1590,10 @@ interface ReplicatedRecord : Versioned
 
 interface ReplicatedTransaction : Disposable
 {
+	// Last chance to return an error and make commit to be aborted.
+	// The transaction still can be rolled back on error happened after this call.
 	boolean prepare();
+	// An error returned from these methods may be logged but do not abort process
 	boolean commit();
 	boolean rollback();
 

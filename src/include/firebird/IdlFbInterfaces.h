@@ -1991,7 +1991,7 @@ namespace Firebird
 
 		static const int EXECUTE_FAILED = -1;
 		static const int SUCCESS_NO_INFO = -2;
-		static const unsigned NO_MORE_ERRORS = 0x7fffffff;
+		static const unsigned NO_MORE_ERRORS = 0xffffffff;
 
 		template <typename StatusType> unsigned getSize(StatusType* status)
 		{

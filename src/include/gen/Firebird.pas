@@ -1563,7 +1563,7 @@ type
 		const VERSION = 3;
 		const EXECUTE_FAILED = Integer(-1);
 		const SUCCESS_NO_INFO = Integer(-2);
-		const NO_MORE_ERRORS = Cardinal($7fffffff);
+		const NO_MORE_ERRORS = Cardinal($ffffffff);
 
 		function getSize(status: IStatus): Cardinal;
 		function getState(status: IStatus; pos: Cardinal): Integer;
