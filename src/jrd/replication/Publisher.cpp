@@ -57,8 +57,9 @@ namespace
 		const auto config = dbb->replConfig();
 		fb_assert(attachment->att_replicator.hasData());
 
-		if (transaction && transaction->tra_replicator && config->disable_on_error)
+		if (transaction && transaction->tra_replicator && config->disable_on_error && canThrow)
 		{
+			// If we cannot throw then calling routine will take care of the replicator
 			transaction->tra_replicator->dispose();
 			transaction->tra_replicator = NULL;
 			transaction->tra_flags &= ~TRA_replicating;
@@ -393,11 +394,9 @@ void REPL_trans_commit(thread_db* tdbb, jrd_tra* transaction)
 	if (!replicator->commit())
 	{
 		handleError(tdbb, transaction, false);
-
-		if (transaction->tra_replicator) // Still alive because of disable_on_error == false
-			transaction->tra_replicator->dispose();
 	}
 
+	replicator->dispose();
 	transaction->tra_replicator = nullptr;
 }
 
@@ -411,12 +410,10 @@ void REPL_trans_rollback(thread_db* tdbb, jrd_tra* transaction)
 	{
 		// Rollback is a terminal routine, we cannot throw here
 		handleError(tdbb, transaction, false);
-
-		if (transaction->tra_replicator) // Still alive because of disable_on_error == false
-			transaction->tra_replicator->dispose();
 	}
 
-	transaction->tra_replicator = NULL;
+	replicator->dispose();
+	transaction->tra_replicator = nullptr;
 }
 
 void REPL_trans_cleanup(Jrd::thread_db* tdbb, TraNumber number)

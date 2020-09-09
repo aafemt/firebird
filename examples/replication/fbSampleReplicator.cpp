@@ -229,14 +229,12 @@ FB_BOOLEAN ReplTransaction::prepare()
 FB_BOOLEAN ReplTransaction::commit()
 {
 	WriteLog(parent->log, "%p\tcommit()\n", this);
-	dispose();
 	return FB_TRUE;
 }
 
 FB_BOOLEAN ReplTransaction::rollback()
 {
 	WriteLog(parent->log, "%p\trollback()\n", this);
-	dispose();
 	return FB_TRUE;
 }
 

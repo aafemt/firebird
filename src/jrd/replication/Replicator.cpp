@@ -210,7 +210,6 @@ bool Replicator::commitTransaction(Transaction* transaction)
 		return false;
 	}
 
-	transaction->dispose();
 	return true;
 }
 
@@ -238,7 +237,6 @@ bool Replicator::rollbackTransaction(Transaction* transaction)
 		return false;
 	}
 
-	transaction->dispose();
 	return true;
 }
 
