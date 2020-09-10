@@ -48,7 +48,8 @@ namespace
 	// should be replicated similar to user-defined ones
 	const int BACKUP_HISTORY_GENERATOR = 9;
 
-	const char* LOG_ERROR_MSG = "Replication encountered an error";
+	const char* LOG_ERROR_MSG = "Replication error";
+	const char* LOG_WARNING_MSG = "Replication warning";
 
  	void handleError(thread_db* tdbb, jrd_tra* transaction = NULL, bool canThrow = true)
 	{
@@ -66,7 +67,17 @@ namespace
 		}
 
 		const auto status = attachment->att_replicator->getStatus();
-		if (status->getState() & IStatus::STATE_ERRORS)
+		const auto state = status->getState();
+		if (state & IStatus::STATE_WARNINGS)
+		{
+			if (config->log_on_error)
+			{
+				string msg;
+				msg.printf("Database: %s\n\t%s", dbb->dbb_filename.c_str(), LOG_WARNING_MSG);
+				iscLogStatus(msg.c_str(), status);
+			}
+		}
+		if (state & IStatus::STATE_ERRORS)
 		{
 			if (config->log_on_error)
 			{
