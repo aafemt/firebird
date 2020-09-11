@@ -4,7 +4,7 @@
  *
  */
 
-
+#include <algorithm>
 #include <atomic>
 #define __USE_MINGW_ANSI_STDIO 1
 #include <stdio.h>
@@ -117,6 +117,7 @@ extern "C"
 static std::atomic_int logCounter;
 
 static const ISC_STATUS err[] = { isc_arg_gds, isc_random, isc_arg_string, (ISC_STATUS)"Intolerable integer value", isc_arg_end };
+static const ISC_STATUS wrn[] = { isc_arg_gds, isc_random, isc_arg_string, (ISC_STATUS)"Just a warning", isc_arg_end };
 
 ReplPlugin::ReplPlugin(IPluginConfig* conf)
 {
@@ -179,6 +180,53 @@ void ReplPlugin::setAttachment(IAttachment* attachment)
 	WriteLog(log, "%p\tAssigned attachment %p\n", this, attachment);
 	att = attachment;
 	att->addRef();
+	CheckStatusWrapper ExtStatus(status);
+	const unsigned char items[] = { fb_info_db_guid };
+	unsigned char response[80];
+	att->getInfo(&ExtStatus, sizeof(items), items, sizeof(response), response);
+	if (status->getState() == 0)
+	{
+		unsigned char* p = response;
+		while (p < response + sizeof(response))
+		{
+			unsigned char item = *p++;
+			unsigned len = p[0] | p[1] << 8;
+			WriteLog(log, "\tInfo item %d with length %u\n", item, len);
+			p += 2;
+			switch (item)
+			{
+			case fb_info_db_guid:
+				{
+					WriteLog(log, "\t\tDatabase GUID = %.*s\n", len, p);
+					break;
+				}
+			case isc_info_end:
+				{
+					return;
+				}
+			case isc_info_truncated:
+				{
+					WriteLog(log, "\t\tDatabase info truncated\n");
+					return;
+				}
+			case isc_info_error:
+				{
+					unsigned err = p[1];
+					for (unsigned i = 1; i < std::min(len, 4U); i++)
+					{
+						err |= p[i + 1] << (8 * i);
+					}
+					WriteLog(log, "\t\tDatabase info error %u for item %d\n", err, p[0]);
+					return;
+				}
+			default:
+				WriteLog(log, "\t\tUnexpected info item %d\n", item);
+				break;
+			}
+			p += len;
+		}
+		WriteLog(log, "\t\tSuspicious exit from info parse loop\n");
+	}
 }
 
 IReplicatedTransaction* ReplPlugin::startTransaction(ITransaction* transaction, ISC_INT64 number)
@@ -235,7 +283,8 @@ FB_BOOLEAN ReplTransaction::commit()
 FB_BOOLEAN ReplTransaction::rollback()
 {
 	WriteLog(parent->log, "%p\trollback()\n", this);
-	return FB_TRUE;
+	parent->status->setWarnings(wrn);
+	return FB_FALSE;
 }
 
 FB_BOOLEAN ReplTransaction::startSavepoint()
