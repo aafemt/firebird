@@ -44,6 +44,8 @@ private:
 	IStatus* status = nullptr;
 	std::atomic_int refCounter;
 	IReferenceCounted* owner;
+
+	void dumpInfo(const unsigned char* buffer, size_t length);
 };
 
 class ReplTransaction: public IReplicatedTransactionImpl<ReplTransaction, CheckStatusWrapper>
@@ -175,6 +177,54 @@ IStatus* ReplPlugin::getStatus()
 	return status;
 }
 
+void ReplPlugin::dumpInfo(const unsigned char* buffer, size_t length)
+{
+	const unsigned char* p = buffer;
+	while (p < buffer + length)
+	{
+		unsigned char item = *p++;
+
+		// Handle terminating items fist
+		if (item == isc_info_end)
+		{
+			return;
+		}
+		if (item == isc_info_truncated)
+		{
+			WriteLog(log, "\t\tDatabase info truncated\n");
+			return;
+		}
+
+		// Now data items
+		const unsigned len = p[0] | p[1] << 8;
+
+		p += 2;
+		switch (item)
+		{
+		case fb_info_db_guid:
+			{
+				WriteLog(log, "\t\tDatabase GUID = %.*s\n", len, p);
+				break;
+			}
+		case isc_info_error:
+			{
+				unsigned err = p[1];
+				for (unsigned i = 1; i < std::min(len, 4U); i++)
+				{
+					err |= p[i + 1] << (8 * i);
+				}
+				WriteLog(log, "\t\tDatabase info error %u for item %d\n", err, p[0]);
+				return;
+			}
+		default:
+			WriteLog(log, "\t\tUnexpected info item %d\n", item);
+			break;
+		}
+		p += len;
+	}
+	WriteLog(log, "\t\tSuspicious exit from info parse loop\n");
+}
+
 void ReplPlugin::setAttachment(IAttachment* attachment)
 {
 	WriteLog(log, "%p\tAssigned attachment %p\n", this, attachment);
@@ -186,46 +236,7 @@ void ReplPlugin::setAttachment(IAttachment* attachment)
 	att->getInfo(&ExtStatus, sizeof(items), items, sizeof(response), response);
 	if (status->getState() == 0)
 	{
-		unsigned char* p = response;
-		while (p < response + sizeof(response))
-		{
-			unsigned char item = *p++;
-			unsigned len = p[0] | p[1] << 8;
-			WriteLog(log, "\tInfo item %d with length %u\n", item, len);
-			p += 2;
-			switch (item)
-			{
-			case fb_info_db_guid:
-				{
-					WriteLog(log, "\t\tDatabase GUID = %.*s\n", len, p);
-					break;
-				}
-			case isc_info_end:
-				{
-					return;
-				}
-			case isc_info_truncated:
-				{
-					WriteLog(log, "\t\tDatabase info truncated\n");
-					return;
-				}
-			case isc_info_error:
-				{
-					unsigned err = p[1];
-					for (unsigned i = 1; i < std::min(len, 4U); i++)
-					{
-						err |= p[i + 1] << (8 * i);
-					}
-					WriteLog(log, "\t\tDatabase info error %u for item %d\n", err, p[0]);
-					return;
-				}
-			default:
-				WriteLog(log, "\t\tUnexpected info item %d\n", item);
-				break;
-			}
-			p += len;
-		}
-		WriteLog(log, "\t\tSuspicious exit from info parse loop\n");
+		dumpInfo(response, sizeof(response));
 	}
 }
 
