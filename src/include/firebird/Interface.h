@@ -305,7 +305,7 @@ namespace Firebird
 		}
 
 	public:
-		static void checkException(CheckStatusWrapper* status)
+		static void checkException(CheckStatusWrapper* /* status */)
 		{
 		}
 	};
