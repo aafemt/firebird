@@ -236,7 +236,7 @@ namespace Replication
 	public:
 		Replicator(Firebird::MemoryPool& pool,
 				   Manager* manager,
-				   const Firebird::Guid& dbGuid,
+				   const Guid& dbGuid,
 				   const Firebird::MetaString& userName);
 
 		// IReplicatedSession methods
@@ -253,7 +253,7 @@ namespace Replication
 	private:
 		Manager* const m_manager;
 		const Config* const m_config;
-		Firebird::Guid m_guid;
+		Guid m_guid;
 		const Firebird::MetaString m_user;
 		Firebird::Array<Transaction*> m_transactions;
 		GeneratorCache m_generators;

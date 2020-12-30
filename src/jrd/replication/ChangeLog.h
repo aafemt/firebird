@@ -46,7 +46,7 @@ namespace Replication
 		char hdr_signature[12];
 		USHORT hdr_version;
 		SegmentState hdr_state;
-		Firebird::Guid hdr_guid;
+		Guid hdr_guid;
 		FB_UINT64 hdr_sequence;
 		FB_UINT64 hdr_length;
 	};
@@ -139,8 +139,8 @@ namespace Replication
 			Segment(MemoryPool& pool, const Firebird::PathName& filename, int handle);
 			virtual ~Segment();
 
-			void init(FB_UINT64 sequence, const Firebird::Guid& guid);
-			bool validate(const Firebird::Guid& guid) const;
+			void init(FB_UINT64 sequence, const Guid& guid);
+			bool validate(const Guid& guid) const;
 			void append(ULONG length, const UCHAR* data);
 			void copyTo(const Firebird::PathName& filename) const;
 
@@ -197,7 +197,7 @@ namespace Replication
 	public:
 		ChangeLog(Firebird::MemoryPool& pool,
 				  const Firebird::string& dbId,
-				  const Firebird::Guid& guid,
+				  const Guid& guid,
 				  const FB_UINT64 sequence,
 				  const Config* config);
 		virtual ~ChangeLog();
@@ -241,7 +241,7 @@ namespace Replication
 		Firebird::Array<Segment*> m_segments;
 		Firebird::AutoPtr<Firebird::SharedMemory<State> > m_sharedMemory;
 		Firebird::Mutex m_localMutex;
-		Firebird::Guid m_guid;
+		Guid m_guid;
 		const FB_UINT64 m_sequence;
 
 		Firebird::Semaphore m_startupSemaphore;

@@ -58,7 +58,7 @@ SLONG	PAG_last_page(Jrd::thread_db* tdbb);
 void	PAG_release_page(Jrd::thread_db* tdbb, const Jrd::PageNumber&, const Jrd::PageNumber&);
 void	PAG_release_pages(Jrd::thread_db* tdbb, USHORT pageSpaceID, int cntRelease,
 			const ULONG* pgNums, const ULONG prior_page);
-void	PAG_set_db_guid(Jrd::thread_db* tdbb, const Firebird::Guid&);
+void	PAG_set_db_guid(Jrd::thread_db* tdbb, const Guid&);
 void	PAG_set_force_write(Jrd::thread_db* tdbb, bool);
 void	PAG_set_no_reserve(Jrd::thread_db* tdbb, bool);
 void	PAG_set_db_readonly(Jrd::thread_db* tdbb, bool);

@@ -97,6 +97,7 @@ Config::Config()
 	  logArchiveTimeout(DEFAULT_LOG_ARCHIVE_TIMEOUT),
 	  syncReplicas(getPool()),
 	  logSourceDirectory(getPool()),
+	  sourceGuid{},
 	  verboseLogging(false),
 	  applyIdleTimeout(DEFAULT_APPLY_IDLE_TIMEOUT),
 	  applyErrorTimeout(DEFAULT_APPLY_ERROR_TIMEOUT),
@@ -105,7 +106,6 @@ Config::Config()
 	  reportErrors(false),
 	  disableOnError(true)
 {
-	sourceGuid.alignment = 0;
 }
 
 Config::Config(const Config& other)
@@ -123,6 +123,7 @@ Config::Config(const Config& other)
 	  logArchiveTimeout(other.logArchiveTimeout),
 	  syncReplicas(getPool(), other.syncReplicas),
 	  logSourceDirectory(getPool(), other.logSourceDirectory),
+	  sourceGuid{},
 	  verboseLogging(other.verboseLogging),
 	  applyIdleTimeout(other.applyIdleTimeout),
 	  applyErrorTimeout(other.applyErrorTimeout),
@@ -131,7 +132,6 @@ Config::Config(const Config& other)
 	  reportErrors(other.reportErrors),
 	  disableOnError(other.disableOnError)
 {
-	sourceGuid.alignment = 0;
 }
 
 // This routine is used to match the database on the master side.

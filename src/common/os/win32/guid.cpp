@@ -33,7 +33,6 @@
 
 #include <windows.h>
 #include <wincrypt.h>
-#include <objbase.h>
 #include <stdio.h>
 
 #include "firebird.h"
@@ -76,9 +75,17 @@ void GenerateRandomBytes(void* buffer, FB_SIZE_T size)
 
 void GenerateGuid(Guid* guid)
 {
-	const HRESULT error = CoCreateGuid((GUID*) guid);
-	if (!SUCCEEDED(error))
-		Firebird::system_call_failed::raise("CoCreateGuid", error);
+	// Use UuidCreateSequentional() because is has stronger protection
+	// from collisions.
+	const RPC_STATUS error = UuidCreateSequential(guid);
+	switch(error)
+	{
+	case RPC_S_OK:
+	case RPC_S_UUID_LOCAL_ONLY:
+		break; // these cases are ok
+	default:
+		Firebird::system_call_failed::raise("UuidCreateSequential", error);
+	}
 }
 
 

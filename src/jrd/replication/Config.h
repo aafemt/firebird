@@ -53,7 +53,7 @@ namespace Replication
 		ULONG logArchiveTimeout;
 		Firebird::ObjectsArray<Firebird::string> syncReplicas;
 		Firebird::PathName logSourceDirectory;
-		Firebird::Guid sourceGuid;
+		Guid sourceGuid;
 		bool verboseLogging;
 		ULONG applyIdleTimeout;
 		ULONG applyErrorTimeout;
