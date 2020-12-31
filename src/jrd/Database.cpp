@@ -354,7 +354,7 @@ namespace Jrd
 		if (readOnly())
 			return;
 
-		if (!dbb_guid.alignment) // hackery way to check whether it was loaded
+		if (!dbb_guid.Data1) // It would be better to full check but one field should be enough
 		{
 			GenerateGuid(&dbb_guid);
 			PAG_set_db_guid(tdbb, dbb_guid);

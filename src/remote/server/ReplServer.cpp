@@ -350,7 +350,7 @@ namespace
 
 		bool checkGuid(const Guid& guid)
 		{
-			if (!m_config->sourceGuid.alignment)
+			if (!m_config->sourceGuid.Data1)
 				return true;
 
 			if (!memcmp(&guid, &m_config->sourceGuid, sizeof(Guid)))

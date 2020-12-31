@@ -2340,26 +2340,20 @@ dsc* evlCharToUuid(thread_db* tdbb, const SysFunction* function, const NestValue
 		}
 	}
 
-	// convert to binary representation
-	char buffer[GUID_BUFF_SIZE];
-	buffer[0] = '{';
-	buffer[37] = '}';
-	buffer[38] = '\0';
-	memcpy(buffer + 1, data, GUID_BODY_SIZE);
+#if defined(_MSC_VER) && _MSC_VER < 1900
+#pragma message("Support of hh size modifier is not sure")
+#endif
 
-	USHORT bytes[16];
-	sscanf(buffer, GUID_NEW_FORMAT,
+	UCHAR bytes[16];
+	sscanf(reinterpret_cast<const char*>(data),
+		"%02hhX%02hhX%02hhX%02hhX-%02hhX%02hhX-%02hhX%02hhX-%02hhX%02hhX-%02hhX%02hhX%02hhX%02hhX%02hhX%02hhX",
 		&bytes[0], &bytes[1], &bytes[2], &bytes[3],
 		&bytes[4], &bytes[5], &bytes[6], &bytes[7],
 		&bytes[8], &bytes[9], &bytes[10], &bytes[11],
 		&bytes[12], &bytes[13], &bytes[14], &bytes[15]);
 
-	UCHAR resultData[16];
-	for (unsigned i = 0; i < 16; ++i)
-		resultData[i] = (UCHAR) bytes[i];
-
 	dsc result;
-	result.makeText(16, ttype_binary, resultData);
+	result.makeText(16, ttype_binary, bytes);
 	EVL_make_value(tdbb, &result, impure);
 
 	return &impure->vlu_desc;
@@ -4105,29 +4099,30 @@ dsc* evlGenUuid(thread_db* tdbb, const SysFunction*, const NestValueArray& args,
 {
 	fb_assert(args.getCount() == 0);
 
-	Guid fbguid;
-	fb_assert(sizeof(fbguid.data) == 16);
+	Guid guid;
+	static_assert(sizeof(guid) == 16, "Guid size mismatch");
 
-	GenerateGuid(&fbguid);
-	Win32GUID* guid = (Win32GUID*)&fbguid;
+	GenerateGuid(&guid);
 
+	// Convert platform-depended UUID into platform-independent form
+	// according to RFC 4122
 	UCHAR data[16];
-	data[0] = (guid->data1 >> 24) & 0xFF;
-	data[1] = (guid->data1 >> 16) & 0xFF;
-	data[2] = (guid->data1 >> 8) & 0xFF;
-	data[3] = guid->data1 & 0xFF;
-	data[4] = (guid->data2 >> 8) & 0xFF;
-	data[5] = guid->data2 & 0xFF;
-	data[6] = (guid->data3 >> 8) & 0xFF;
-	data[7] = guid->data3 & 0xFF;
-	data[8] = guid->data4[0];
-	data[9] = guid->data4[1];
-	data[10] = guid->data4[2];
-	data[11] = guid->data4[3];
-	data[12] = guid->data4[4];
-	data[13] = guid->data4[5];
-	data[14] = guid->data4[6];
-	data[15] = guid->data4[7];
+	data[0] = (guid.Data1 >> 24) & 0xFF;
+	data[1] = (guid.Data1 >> 16) & 0xFF;
+	data[2] = (guid.Data1 >> 8) & 0xFF;
+	data[3] = guid.Data1 & 0xFF;
+	data[4] = (guid.Data2 >> 8) & 0xFF;
+	data[5] = guid.Data2 & 0xFF;
+	data[6] = (guid.Data3 >> 8) & 0xFF;
+	data[7] = guid.Data3 & 0xFF;
+	data[8] = guid.Data4[0];
+	data[9] = guid.Data4[1];
+	data[10] = guid.Data4[2];
+	data[11] = guid.Data4[3];
+	data[12] = guid.Data4[4];
+	data[13] = guid.Data4[5];
+	data[14] = guid.Data4[6];
+	data[15] = guid.Data4[7];
 
 	dsc result;
 	result.makeText(16, ttype_binary, data);
@@ -6264,15 +6259,16 @@ dsc* evlUuidToChar(thread_db* tdbb, const SysFunction* function, const NestValue
 										Arg::Str(function->name));
 	}
 
-	char buffer[GUID_BUFF_SIZE];
-	sprintf(buffer, GUID_NEW_FORMAT,
-		USHORT(data[0]), USHORT(data[1]), USHORT(data[2]), USHORT(data[3]), USHORT(data[4]),
-		USHORT(data[5]), USHORT(data[6]), USHORT(data[7]), USHORT(data[8]), USHORT(data[9]),
-		USHORT(data[10]), USHORT(data[11]), USHORT(data[12]), USHORT(data[13]), USHORT(data[14]),
-		USHORT(data[15]));
+	UCHAR buffer[GUID_BUFF_SIZE];
+	sprintf(reinterpret_cast<char*>(buffer),
+		"%02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X",
+		data[0], data[1], data[2], data[3], data[4],
+		data[5], data[6], data[7], data[8], data[9],
+		data[10], data[11], data[12], data[13], data[14],
+		data[15]);
 
 	dsc result;
-	result.makeText(GUID_BODY_SIZE, ttype_ascii, reinterpret_cast<UCHAR*>(buffer) + 1);
+	result.makeText(GUID_BODY_SIZE, ttype_ascii, buffer);
 	EVL_make_value(tdbb, &result, impure);
 
 	return &impure->vlu_desc;
