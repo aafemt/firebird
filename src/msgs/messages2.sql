@@ -3280,6 +3280,7 @@ Fetches = !', NULL, NULL);
 ('DATABASE_CRYPT_PROCESS', 'SHOW_dbb_parameters', 'show.epp', NULL, 17, 194, NULL, 'crypt thread not complete', NULL, NULL);
 ('MSG_ROLES', 'SHOW_metadata', 'show.epp', NULL, 17, 195, NULL, 'Roles:', NULL, NULL);
 ('NO_TIMEOUTS', 'process_statement', 'isql.epp', NULL, 17, 196, NULL, 'Timeouts are not supported by server', NULL, NULL);
+('BAD_STMT_TYPE', 'precess_statement', 'isql.epp', NULL, 17, 199, NULL, 'Statement type is not recognized', NULL, NULL);
 -- GSEC
 ('GsecMsg1', 'get_line', 'gsec.e', NULL, 18, 1, NULL, 'GSEC>', NULL, NULL);
 ('GsecMsg2', 'printhelp', 'gsec.e', 'This message is used in the Help display. It should be the same as number 1 (but in lower case).', 18, 2, NULL, 'gsec', NULL, NULL);
