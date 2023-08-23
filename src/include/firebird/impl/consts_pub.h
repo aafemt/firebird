@@ -129,6 +129,7 @@
 #define isc_dpb_decfloat_round            94
 #define isc_dpb_decfloat_traps            95
 #define isc_dpb_clear_map				  96
+#define isc_dpb_owner					 102
 
 
 /**************************************************/

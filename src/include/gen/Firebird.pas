@@ -3858,6 +3858,7 @@ const
 	isc_dpb_decfloat_round = byte(94);
 	isc_dpb_decfloat_traps = byte(95);
 	isc_dpb_clear_map = byte(96);
+	isc_dpb_owner = byte(102);
 	isc_dpb_address = byte(1);
 	isc_dpb_addr_protocol = byte(1);
 	isc_dpb_addr_endpoint = byte(2);
