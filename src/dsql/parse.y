@@ -683,6 +683,7 @@ using namespace Firebird;
 %token <metaNamePtr> PKCS_1_5
 %token <metaNamePtr> BLOB_APPEND
 
+%token <metaNamePtr> OWNER
 // precedence declarations for expression evaluation
 
 %left	OR
@@ -2101,6 +2102,8 @@ db_initial_option($alterDatabaseNode)
 	: PAGE_SIZE equals NUMBER32BIT
 	| USER symbol_user_name
 	| USER utf_string
+	| OWNER symbol_user_name
+	| OWNER utf_string
 	| ROLE valid_symbol_name
 	| ROLE utf_string
 	| PASSWORD utf_string
@@ -9065,6 +9068,7 @@ non_reserved_word
 	| DEBUG				// added in FB 4.0.1
 	| PKCS_1_5
 	| BLOB_APPEND
+	| OWNER
 	;
 
 %%

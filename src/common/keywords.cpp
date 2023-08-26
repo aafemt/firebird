@@ -349,6 +349,7 @@ static const TOK tokens[] =
 	{TOK_OVERFLOW, "OVERFLOW", true},
 	{TOK_OVERLAY, "OVERLAY", true},
 	{TOK_OVERRIDING, "OVERRIDING", true},
+	{TOK_OWNER, "OWNER", true},
 	{TOK_PACKAGE, "PACKAGE", true},
 	{TOK_PAD, "PAD", true},
 	{TOK_PAGE, "PAGE", true},
