@@ -35,24 +35,22 @@
 #include <firebird/Interface.h>
 
 enum pp_vals {
-	PP_CREATE = 0,
-	PP_DATABASE = 1,
-	PP_SCHEMA = 2,
-	PP_PAGE_SIZE = 3,
-	PP_USER = 4,
-	PP_PASSWORD = 5,
-	PP_PAGESIZE = 6,
-	PP_LENGTH = 7,
-	PP_PAGES = 8,
-	PP_PAGE = 9,
-	PP_SET = 10,
-	PP_NAMES = 11,
-	PP_ROLE = 12,
-	PP_OWNER = 13
+	PP_CREATE,
+	PP_DATABASE,
+	PP_SCHEMA,
+	PP_PAGE_SIZE,
+	PP_USER,
+	PP_PASSWORD,
+	PP_PAGESIZE,
+	PP_SET,
+	PP_NAMES,
+	PP_ROLE,
+	PP_OWNER,
+	PP_DEFAULT,
+	PP_CHARACTER,
+	PP_COLLATION
 };
 
-
-const size_t MAX_TOKEN_SIZE = 1024;
 static void generate_error(const Firebird::NoCaseString&, SSHORT, char = 0);
 
 struct pp_table
@@ -72,13 +70,13 @@ static const pp_table pp_symbols[] =
 	{"USER", PP_USER},
 	{"PASSWORD", PP_PASSWORD},
 	{"PAGESIZE", PP_PAGESIZE},
-	{"LENGTH", PP_LENGTH},
-	{"PAGES", PP_PAGES},
-	{"PAGE", PP_PAGE},
 	{"SET", PP_SET},
 	{"NAMES", PP_NAMES},
 	{"ROLE", PP_ROLE},
 	{"OWNER", PP_OWNER},
+	{"DEFAULT", PP_DEFAULT},
+	{"CHARACTER", PP_CHARACTER},
+	{"COLLATION", PP_COLLATION},
 	{"", 0}
 };
 
@@ -166,181 +164,131 @@ bool PREPARSE_execute(CheckStatusWrapper* status, Why::YAttachment** ptrAtt,
 
 	try
 	{
+		status->init();
+
 		if (stmt.isEmpty())
 		{
 			return false;	// let others care
 		}
 
-		bool hasUser = true;
-		status->init();
-		for (int qStrip = 0; qStrip < 2; ++qStrip)
+
+		Tokens tks;
+		tks.quotes(quotes);
+		tks.parse(stmt.length(), stmt.c_str());
+
+		unsigned pos = 0;
+
+		if (getToken(pos, tks) != pp_symbols[PP_CREATE].symbol)
 		{
-			hasUser = false;
-
-			Tokens tks;
-			tks.quotes(quotes);
-			tks.parse(stmt.length(), stmt.c_str());
-
-			for (int tokenPos = tks.getCount() - 1; tokenPos >= 0; --tokenPos)
-			{
-				const Tokens::Tok& token = tks[tokenPos];
-
-				if (token.length > 0 && token.text[0] == '"')
-				{
-					string newToken = "'";
-
-					for (unsigned i = 1; i < token.length - 1; ++i)
-					{
-						switch (token.text[i])
-						{
-							case '\'':
-								newToken += "''";
-								break;
-
-							case '"':
-								++i;
-								newToken += '"';
-								break;
-
-							default:
-								newToken += token.text[i];
-						}
-					}
-
-					newToken += "'";
-					stmt.replace(token.origin, token.length, newToken);
-				}
-			}
-
-			unsigned pos = 0;
-
-			if (getToken(pos, tks) != pp_symbols[PP_CREATE].symbol)
-			{
-				return false;
-			}
-
-			NoCaseString token(getToken(pos, tks));
-			if (token != pp_symbols[PP_DATABASE].symbol && token != pp_symbols[PP_SCHEMA].symbol)
-			{
-				return false;
-			}
-
-			PathName file_name(getToken(pos, tks, STRING).ToPathName());
-			*stmt_eaten = false;
-			ClumpletWriter dpb(ClumpletReader::dpbList, MAX_DPB_SIZE);
-
-			dpb.insertByte(isc_dpb_overwrite, 0);
-			dpb.insertInt(isc_dpb_sql_dialect, dialect);
-
-			SLONG page_size = 0;
-			bool matched;
-
-			do
-			{
-				try
-				{
-					token = getToken(pos, tks);
-				}
-				catch (const Exception&)
-				{
-					*stmt_eaten = true;
-					break;
-				}
-
-				matched = false;
-				for (int i = 3; pp_symbols[i].symbol[0] && !matched; i++)
-				{
-					if (token == pp_symbols[i].symbol)
-					{
-						// CVC: What's strange, this routine doesn't check token.length()
-						// but it proceeds blindly, trying to exhaust the token itself.
-
-						switch (pp_symbols[i].code)
-						{
-						case PP_PAGE_SIZE:
-						case PP_PAGESIZE:
-							token = getToken(pos, tks);
-							if (token == "=")
-								token = getToken(pos, tks, NUMERIC);
-
-							page_size = token.length() > 8 ? 100000000 : atol(token.c_str());
-							dpb.insertInt(isc_dpb_page_size, page_size);
-							matched = true;
-							break;
-
-						case PP_USER:
-							token = getToken(pos, tks, qStrip ? STRING : SYMBOL);
-
-							dpb.insertString(isc_dpb_user_name, token.ToString());
-							matched = true;
-							hasUser = true;
-							break;
-
-						case PP_PASSWORD:
-							token = getToken(pos, tks, STRING);
-
-							dpb.insertString(isc_dpb_password, token.ToString());
-							matched = true;
-							break;
-
-						case PP_ROLE:
-							token = getToken(pos, tks);
-
-							dpb.insertString(isc_dpb_sql_role_name, token.ToString());
-							matched = true;
-							break;
-
-						case PP_SET:
-							token = getToken(pos, tks);
-							if (token != pp_symbols[PP_NAMES].symbol)
-								generate_error(token, UNEXPECTED_TOKEN);
-							token = getToken(pos, tks, STRING);
-
-							dpb.insertString(isc_dpb_lc_ctype, token.ToString());
-							matched = true;
-							break;
-
-						case PP_LENGTH:
-							token = getToken(pos, tks);
-							if (token == "=")
-								token = getToken(pos, tks, NUMERIC);
-
-							// Skip a token for value
-							matched = true;
-							break;
-
-						case PP_PAGE:
-						case PP_PAGES:
-							matched = true;
-							break;
-
-						case PP_OWNER:
-							token = getToken(pos, tks);
-
-							dpb.insertString(isc_dpb_owner, token);
-							matched = true;
-							break;
-						} // switch
-					} // if
-				} // for
-			} while (matched);
-
-			RefPtr<Why::Dispatcher> dispatcher(FB_NEW Why::Dispatcher);
-			*ptrAtt = dispatcher->createDatabase(status, file_name.c_str(),
-				dpb.getBufferLength(), dpb.getBuffer());
-
-			if ((!hasUser) || ((status->getState() & IStatus::STATE_ERRORS) == 0) ||
-				(status->getErrors()[1] != isc_login))
-			{
-				break;
-			}
+			return false;
 		}
+
+		NoCaseString token(getToken(pos, tks));
+		if (token != pp_symbols[PP_DATABASE].symbol && token != pp_symbols[PP_SCHEMA].symbol)
+		{
+			return false;
+		}
+
+		PathName file_name(getToken(pos, tks, STRING).ToPathName());
+
+		ClumpletWriter dpb(ClumpletReader::dpbList, MAX_DPB_SIZE);
+		dpb.insertByte(isc_dpb_overwrite, 0);
+		dpb.insertInt(isc_dpb_sql_dialect, dialect);
+
+		bool hasUser = false;
+		SLONG page_size = 0;
+
+		while (pos < tks.getCount())
+		{
+			token = getToken(pos, tks);
+
+			bool matched = false;
+			for (int i = 3; pp_symbols[i].symbol[0] && !matched; i++)
+			{
+				if (token == pp_symbols[i].symbol)
+				{
+					matched = true;
+
+					switch (pp_symbols[i].code)
+					{
+					case PP_PAGE_SIZE:
+					case PP_PAGESIZE:
+						token = getToken(pos, tks);
+						if (token == "=")
+							token = getToken(pos, tks, NUMERIC);
+
+						page_size = token.length() > 8 ? 100000000 : atol(token.c_str());
+						dpb.insertInt(isc_dpb_page_size, page_size);
+						break;
+
+					case PP_USER:
+						token = getToken(pos, tks, SYMBOL);
+
+						dpb.insertString(isc_dpb_user_name, token);
+						hasUser = true;
+						break;
+
+					case PP_PASSWORD:
+						token = getToken(pos, tks, STRING);
+
+						dpb.insertString(isc_dpb_password, token);
+						break;
+
+					case PP_ROLE:
+						token = getToken(pos, tks);
+
+						dpb.insertString(isc_dpb_sql_role_name, token);
+						break;
+
+					case PP_SET:
+						token = getToken(pos, tks);
+						if (token != pp_symbols[PP_NAMES].symbol)
+							generate_error(token, UNEXPECTED_TOKEN);
+						token = getToken(pos, tks);
+
+						dpb.insertString(isc_dpb_lc_ctype, token);
+						break;
+
+					case PP_OWNER:
+						token = getToken(pos, tks);
+
+						dpb.insertString(isc_dpb_owner, token);
+						break;
+
+					case PP_DEFAULT:
+						token = getToken(pos, tks);
+						if (token != pp_symbols[PP_CHARACTER].symbol)
+							generate_error(token, UNEXPECTED_TOKEN);
+						if (token != pp_symbols[PP_SET].symbol)
+							generate_error(token, UNEXPECTED_TOKEN);
+						token = getToken(pos, tks);
+
+						dpb.insertString(isc_dpb_set_db_charset, token);
+						break;
+
+					default:
+						generate_error(token, UNEXPECTED_TOKEN);
+						break;
+
+					} // switch
+				} // if
+			} // for
+
+			if (!matched)
+			{
+				generate_error(token, UNEXPECTED_TOKEN);
+			}
+		} // while
+
+		RefPtr<Why::Dispatcher> dispatcher(FB_NEW Why::Dispatcher);
+		*ptrAtt = dispatcher->createDatabase(status, file_name.c_str(),
+			dpb.getBufferLength(), dpb.getBuffer());
+
 	}
 	catch (const Exception& ex)
 	{
 		if (!(status->getState() & IStatus::STATE_ERRORS))
 			ex.stuffException(status);
-		return true;
 	}
 
 	return true;
