@@ -157,7 +157,7 @@ static NoCaseString getToken(unsigned& pos, const Tokens& toks, int symbol = SYM
 
  **/
 bool PREPARSE_execute(CheckStatusWrapper* status, Why::YAttachment** ptrAtt,
-					  string& stmt, bool* stmt_eaten, USHORT dialect)
+					  string& stmt, USHORT dialect)
 {
 	// no use creating separate pool for a couple of strings
 	ContextPoolHolder context(getDefaultMemoryPool());
@@ -259,6 +259,7 @@ bool PREPARSE_execute(CheckStatusWrapper* status, Why::YAttachment** ptrAtt,
 						token = getToken(pos, tks);
 						if (token != pp_symbols[PP_CHARACTER].symbol)
 							generate_error(token, UNEXPECTED_TOKEN);
+						token = getToken(pos, tks);
 						if (token != pp_symbols[PP_SET].symbol)
 							generate_error(token, UNEXPECTED_TOKEN);
 						token = getToken(pos, tks);

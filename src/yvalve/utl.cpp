@@ -575,16 +575,15 @@ YAttachment* UtilInterface::executeCreateDatabase(
 {
 	try
 	{
-		bool stmtEaten;
 		YAttachment* att = NULL;
 
 		if (stmtIsCreateDb)
 			*stmtIsCreateDb = FB_FALSE;
 
 		string statement(creatDBstatement,
-			(stmtLength == 0 && creatDBstatement ? strlen(creatDBstatement) : stmtLength));
+			(stmtLength == 0 && creatDBstatement ? static_cast<string::size_type>(strlen(creatDBstatement)) : stmtLength));
 
-		if (!PREPARSE_execute(status, &att, statement, &stmtEaten, dialect))
+		if (!PREPARSE_execute(status, &att, statement, dialect))
 			return NULL;
 
 		if (stmtIsCreateDb)
@@ -592,38 +591,6 @@ YAttachment* UtilInterface::executeCreateDatabase(
 
 		if (status->getState() & Firebird::IStatus::STATE_ERRORS)
 			return NULL;
-
-		LocalStatus tempStatus;
-		CheckStatusWrapper tempCheckStatusWrapper(&tempStatus);
-
-		ITransaction* crdbTrans = att->startTransaction(status, 0, NULL);
-
-		if (status->getState() & Firebird::IStatus::STATE_ERRORS)
-		{
-			att->dropDatabase(&tempCheckStatusWrapper);
-			return NULL;
-		}
-
-		bool v3Error = false;
-
-		if (!stmtEaten)
-		{
-			att->execute(status, crdbTrans, statement.length(), statement.c_str(), dialect, NULL, NULL, NULL, NULL);
-			if (status->getState() & Firebird::IStatus::STATE_ERRORS)
-			{
-				crdbTrans->rollback(&tempCheckStatusWrapper);
-				att->dropDatabase(&tempCheckStatusWrapper);
-				return NULL;
-			}
-		}
-
-		crdbTrans->commit(status);
-		if (status->getState() & Firebird::IStatus::STATE_ERRORS)
-		{
-			crdbTrans->rollback(&tempCheckStatusWrapper);
-			att->dropDatabase(&tempCheckStatusWrapper);
-			return NULL;
-		}
 
 		return att;
 	}
