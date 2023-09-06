@@ -26,13 +26,17 @@
 #include <stdlib.h>
 #include <string.h>
 #include "../yvalve/prepa_proto.h"
-#include "../yvalve/gds_proto.h"
 #include "../yvalve/YObjects.h"
 #include "../common/classes/ClumpletWriter.h"
 #include "../common/StatusArg.h"
 #include "../common/Tokens.h"
 
 #include <firebird/Interface.h>
+
+using namespace Firebird;
+
+namespace Preparse
+{
 
 enum pp_vals {
 	PP_CREATE,
@@ -51,7 +55,7 @@ enum pp_vals {
 	PP_COLLATION
 };
 
-static void generate_error(const Firebird::NoCaseString&, SSHORT, char = 0);
+static void generate_error(const NoCaseString& token, SSHORT error, char quote = 0);
 
 struct pp_table
 {
@@ -88,15 +92,13 @@ enum token_vals {
 	TOKEN_TOO_LONG = -2,
 	UNEXPECTED_END_OF_COMMAND = -3,
 	UNEXPECTED_TOKEN = -4,
+	DUPLICATED_TOKEN = -5,
 	STRING = 257,
 	NUMERIC = 258,
 	SYMBOL = 259
 };
 
 static const char* quotes = "\"\'";
-
-
-using namespace Firebird;
 
 
 static NoCaseString getToken(unsigned& pos, const Tokens& toks, int symbol = SYMBOL)
@@ -144,20 +146,19 @@ static NoCaseString getToken(unsigned& pos, const Tokens& toks, int symbol = SYM
 
 /**
 
- 	PREPARSE_execute
+ 	Preparse::createDatabase
 
-    @brief
+    @brief Parse	CREATE DATABASE statement and fills DPB and database name accordingly. Returns false if this is not CREATE DATABASE statement.
 
-    @param status
-    @param ptrAtt
-    @param stmt_length
-    @param stmt
-    @param stmt_eaten
-    @param dialect
+    @param status	To report error
+    @param stmt		Statement to parse
+    @param length	Length of stmt (0 for zero-terminated string)
+    @param dpb		(out) DPB to be filled
+    @param database	(out) database name
+    @param dialect	Dialect for syntax rules
 
  **/
-bool PREPARSE_execute(CheckStatusWrapper* status, Why::YAttachment** ptrAtt,
-					  string& stmt, USHORT dialect)
+bool createDatabase(CheckStatusWrapper* status, const char* stmt, FB_SIZE_T length, ClumpletWriter& dpb, string& database, USHORT dialect)
 {
 	// no use creating separate pool for a couple of strings
 	ContextPoolHolder context(getDefaultMemoryPool());
@@ -166,15 +167,20 @@ bool PREPARSE_execute(CheckStatusWrapper* status, Why::YAttachment** ptrAtt,
 	{
 		status->init();
 
-		if (stmt.isEmpty())
+		if (stmt == nullptr)
 		{
 			return false;	// let others care
 		}
 
-
 		Tokens tks;
 		tks.quotes(quotes);
-		tks.parse(stmt.length(), stmt.c_str());
+		tks.parse(length, stmt);
+
+		if (tks.getCount() < 2)
+		{
+			// It cannot be "CREATE DATABASE/SCHEMA" in any way
+			return false;
+		}
 
 		unsigned pos = 0;
 
@@ -189,13 +195,17 @@ bool PREPARSE_execute(CheckStatusWrapper* status, Why::YAttachment** ptrAtt,
 			return false;
 		}
 
-		PathName file_name(getToken(pos, tks, STRING).ToPathName());
+		database = getToken(pos, tks, STRING).ToString();
 
-		ClumpletWriter dpb(ClumpletReader::dpbList, MAX_DPB_SIZE);
 		dpb.insertByte(isc_dpb_overwrite, 0);
 		dpb.insertInt(isc_dpb_sql_dialect, dialect);
 
 		bool hasUser = false;
+		bool hasRole = false;
+		bool hasPassword = false;
+		bool hasNames = false;
+		bool hasOwner = false;
+		bool hasCharset = false;
 		SLONG page_size = 0;
 
 		while (pos < tks.getCount())
@@ -213,58 +223,112 @@ bool PREPARSE_execute(CheckStatusWrapper* status, Why::YAttachment** ptrAtt,
 					{
 					case PP_PAGE_SIZE:
 					case PP_PAGESIZE:
-						token = getToken(pos, tks);
-						if (token == "=")
-							token = getToken(pos, tks, NUMERIC);
+						if (page_size != 0)
+						{
+							generate_error(token, DUPLICATED_TOKEN);
+						}
+						else
+						{
+							token = getToken(pos, tks);
+							if (token == "=")
+								token = getToken(pos, tks, NUMERIC);
 
-						page_size = token.length() > 8 ? 100000000 : atol(token.c_str());
-						dpb.insertInt(isc_dpb_page_size, page_size);
+							page_size = token.length() > 8 ? 100000000 : atol(token.c_str());
+							dpb.insertInt(isc_dpb_page_size, page_size);
+						}
 						break;
 
 					case PP_USER:
-						token = getToken(pos, tks, SYMBOL);
+						if (hasUser)
+						{
+							generate_error(token, DUPLICATED_TOKEN);
+						}
+						else
+						{
+							token = getToken(pos, tks, SYMBOL);
 
-						dpb.insertString(isc_dpb_user_name, token);
-						hasUser = true;
+							dpb.insertString(isc_dpb_user_name, token);
+							hasUser = true;
+						}
 						break;
 
 					case PP_PASSWORD:
-						token = getToken(pos, tks, STRING);
+						if (hasPassword)
+						{
+							generate_error(token, DUPLICATED_TOKEN);
+						}
+						else
+						{
+							token = getToken(pos, tks, STRING);
 
-						dpb.insertString(isc_dpb_password, token);
+							dpb.insertString(isc_dpb_password, token);
+							hasPassword = true;
+						}
 						break;
 
 					case PP_ROLE:
-						token = getToken(pos, tks);
+						if (hasRole)
+						{
+							generate_error(token, DUPLICATED_TOKEN);
+						}
+						else
+						{
+							token = getToken(pos, tks);
 
-						dpb.insertString(isc_dpb_sql_role_name, token);
+							dpb.insertString(isc_dpb_sql_role_name, token);
+							hasRole = true;
+						}
 						break;
 
 					case PP_SET:
-						token = getToken(pos, tks);
-						if (token != pp_symbols[PP_NAMES].symbol)
-							generate_error(token, UNEXPECTED_TOKEN);
-						token = getToken(pos, tks);
+						if (hasNames)
+						{
+							generate_error(token, DUPLICATED_TOKEN);
+						}
+						else
+						{
+							token = getToken(pos, tks);
+							if (token != pp_symbols[PP_NAMES].symbol)
+								generate_error(token, UNEXPECTED_TOKEN);
+							token = getToken(pos, tks);
 
-						dpb.insertString(isc_dpb_lc_ctype, token);
+							dpb.insertString(isc_dpb_lc_ctype, token);
+							hasNames = true;
+						}
 						break;
 
 					case PP_OWNER:
-						token = getToken(pos, tks);
+						if (hasOwner)
+						{
+							generate_error(token, DUPLICATED_TOKEN);
+						}
+						else
+						{
+							token = getToken(pos, tks);
 
-						dpb.insertString(isc_dpb_owner, token);
+							dpb.insertString(isc_dpb_owner, token);
+							hasOwner = true;
+						}
 						break;
 
 					case PP_DEFAULT:
-						token = getToken(pos, tks);
-						if (token != pp_symbols[PP_CHARACTER].symbol)
-							generate_error(token, UNEXPECTED_TOKEN);
-						token = getToken(pos, tks);
-						if (token != pp_symbols[PP_SET].symbol)
-							generate_error(token, UNEXPECTED_TOKEN);
-						token = getToken(pos, tks);
+						if (hasCharset)
+						{
+							generate_error(token, DUPLICATED_TOKEN);
+						}
+						else
+						{
+							token = getToken(pos, tks);
+							if (token != pp_symbols[PP_CHARACTER].symbol)
+								generate_error(token, UNEXPECTED_TOKEN);
+							token = getToken(pos, tks);
+							if (token != pp_symbols[PP_SET].symbol)
+								generate_error(token, UNEXPECTED_TOKEN);
+							token = getToken(pos, tks);
 
-						dpb.insertString(isc_dpb_set_db_charset, token);
+							dpb.insertString(isc_dpb_set_db_charset, token);
+							hasCharset = true;
+						}
 						break;
 
 					default:
@@ -280,11 +344,6 @@ bool PREPARSE_execute(CheckStatusWrapper* status, Why::YAttachment** ptrAtt,
 				generate_error(token, UNEXPECTED_TOKEN);
 			}
 		} // while
-
-		RefPtr<Why::Dispatcher> dispatcher(FB_NEW Why::Dispatcher);
-		*ptrAtt = dispatcher->createDatabase(status, file_name.c_str(),
-			dpb.getBufferLength(), dpb.getBuffer());
-
 	}
 	catch (const Exception& ex)
 	{
@@ -300,15 +359,14 @@ bool PREPARSE_execute(CheckStatusWrapper* status, Why::YAttachment** ptrAtt,
 
  	generate_error
 
-    @brief
+    @brief	Throw Firebird::Exception according to given parameters
 
-    @param status
-    @param token
-    @param error
-    @param result
+    @param token	Token which caused error
+    @param error	Kind of error
+    @param quote	Quotation symbol for token
 
  **/
-static void generate_error(const NoCaseString& token, SSHORT error, char result)
+static void generate_error(const NoCaseString& token, SSHORT error, char quote)
 {
 	string err_string;
 
@@ -328,11 +386,11 @@ static void generate_error(const NoCaseString& token, SSHORT error, char result)
 
 	case UNEXPECTED_TOKEN:
 	case TOKEN_TOO_LONG:
-		if (result)
+		if (quote)
 		{
-			err_string = result;
+			err_string = quote;
 			err_string += token.ToString();
-			err_string += result;
+			err_string += quote;
 		}
 		else
 			err_string = token.ToString();
@@ -343,7 +401,16 @@ static void generate_error(const NoCaseString& token, SSHORT error, char result)
 		temp_status[9] = (ISC_STATUS)(err_string.c_str());
 		temp_status[10] = isc_arg_end;
 		break;
+
+	case DUPLICATED_TOKEN:
+		temp_status[5] = isc_dsql_duplicate_spec;
+		temp_status[6] = isc_arg_string;
+		temp_status[7] = (ISC_STATUS)(token.c_str());
+		temp_status[8] = isc_arg_end;
+		break;
 	}
 
 	Arg::StatusVector(temp_status).raise();
 }
+
+} // namespace Preparse

@@ -26,11 +26,11 @@
 
 #include "firebird/Interface.h"
 #include "../common/classes/fb_string.h"
+#include "../common/classes/ClumpletWriter.h"
 
-namespace Why {
-	class YAttachment;
+namespace Preparse
+{
+	bool createDatabase(Firebird::CheckStatusWrapper* status, const char* stmt, FB_SIZE_T length, Firebird::ClumpletWriter& dpb, Firebird::string& database, USHORT dialect);
 }
-
-bool PREPARSE_execute(Firebird::CheckStatusWrapper*, Why::YAttachment**, Firebird::string&, USHORT);
 
 #endif //  DSQL_PREPA_PROTO_H

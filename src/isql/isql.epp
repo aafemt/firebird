@@ -115,6 +115,7 @@ enum literal_string_type
 #include "../yvalve/perf_proto.h"
 #include "../yvalve/utl_proto.h"
 #include "../yvalve/why_proto.h"
+#include "../yvalve/prepa_proto.h"
 #include "../common/gdsassert.h"
 
 #include "../isql/Extender.h"
@@ -4134,20 +4135,6 @@ static processing_state copy_table(TEXT* source,
 }
 
 
-static void appendClause(Firebird::string& to, const char* label, const TEXT* value, char quote = 0)
-{
-	to += ' ';
-	to += label;
-	to += ' ';
-	if (quote)
-		to += quote;
-	to += value;
-	if (quote)
-		to += quote;
-	to += ' ';
-}
-
-
 static processing_state create_db(const TEXT* statement, TEXT* d_name)
 {
 /**************************************
@@ -4172,119 +4159,42 @@ static processing_state create_db(const TEXT* statement, TEXT* d_name)
 	// Disconnect from the database and cleanup
 	ISQL_disconnect_database(false);
 
-	// Parse statement to tokens
-	const char* quotes = "\"'";
-	Firebird::string nlStatement(statement);
-	nlStatement += '\n';
-	Firebird::Tokens toks;
-	toks.quotes(quotes);
-	toks.parse(0, nlStatement.c_str());
+	ret = SKIP;
 
-	const unsigned KEY_USER = 0;
-	const unsigned KEY_PASS = 1;
-	const unsigned KEY_ROLE = 2;
-	const unsigned KEY_NAMES = 3;
-	const unsigned KEY_SET = 4;
+	Firebird::string database;
+	Firebird::ClumpletWriter dpb(Firebird::ClumpletReader::dpbList, MAX_DPB_SIZE);
 
-	struct Key
+	// If the isqlGlob.SQL_dialect is not set or set to 2, create the database
+	// as a dialect 3 database.
+	unsigned dialect =
+		(isqlGlob.SQL_dialect == 0 || isqlGlob.SQL_dialect == SQL_DIALECT_V6_TRANSITION) ?
+			requested_SQL_dialect : isqlGlob.SQL_dialect;
+
+	if (!Preparse::createDatabase(fbStatus, statement, 0, dpb, database, dialect) || ISQL_errmsg(fbStatus))
 	{
-		const char* text;
-		bool has;
-	};
-
-	Key keys[5] = {
-		{ "USER", false },
-		{ "PASSWORD", false },
-		{ "ROLE", false },
-		{ "NAMES", false },
-		{ "SET", false }
-	};
-
-	for (unsigned t = 0; t < toks.getCount(); ++t)
-	{
-		Firebird::NoCaseString token(toks[t].text, toks[t].length);
-		unsigned k;
-
-		for (k = 0; k < FB_NELEM(keys); ++k)
-		{
-			if (token == keys[k].text)
-			{
-				if (k != KEY_NAMES || keys[KEY_SET].has)
-					keys[k].has = true;
-				break;
-			}
-		}
-
-		if (k != KEY_SET)
-			keys[KEY_SET].has = false;
+		ret = FAIL;
 	}
-
-	for (int createWithoutRole = 0; createWithoutRole < 2; ++createWithoutRole)
+	else
 	{
-		ret = SKIP;
-		TEXT usr[USER_LENGTH];
-		TEXT psw[PASSWORD_LENGTH];
-		TEXT role[ROLE_LENGTH];
+		// If there is a global parameter, we will set it into the DPB.
+		if (global_usr && !dpb.find(isc_dpb_user_name))
+			dpb.insertString(isc_dpb_user_name, isqlGlob.User);
 
-		Firebird::string modifiedCreateStatement(statement);
+		if (global_psw && !dpb.find(isc_dpb_password))
+			dpb.insertString(isc_dpb_password, Password);
 
-		TEXT quote = DBL_QUOTE;
-		const TEXT* p = NULL;
+		if (global_role && !dpb.find(isc_dpb_sql_role_name))
+			dpb.insertString(isc_dpb_sql_role_name, isqlGlob.Role);
 
-		// If there is a global parameter, we will set it into the create stmt.
-		if (global_usr || global_role || global_psw ||
-			(*setValues.ISQL_charset && strcmp(setValues.ISQL_charset, DEFCHARSET)))
-		{
-			strcpy(usr, isqlGlob.User);
-			strip_quotes(Password, psw);
-			strcpy(role, isqlGlob.Role);
+		if (*setValues.ISQL_charset && strcmp(setValues.ISQL_charset, DEFCHARSET) && !dpb.find(isc_dpb_lc_ctype))
+			dpb.insertString(isc_dpb_lc_ctype, setValues.ISQL_charset);
 
-			Firebird::string clauses;
-
-			if (global_usr && !keys[KEY_USER].has)
-				appendClause(clauses, keys[KEY_USER].text, usr);
-
-			if (global_psw && !keys[KEY_PASS].has)
-				appendClause(clauses, keys[KEY_PASS].text, psw, SINGLE_QUOTE);
-
-			if (global_role && (!keys[KEY_ROLE].has) && createWithoutRole == 0)
-				appendClause(clauses, keys[KEY_ROLE].text, role);
-
-			if (*setValues.ISQL_charset && strcmp(setValues.ISQL_charset, DEFCHARSET)&& !keys[KEY_NAMES].has)
-			{
-				Firebird::string setNames = keys[KEY_SET].text;
-				setNames += ' ';
-				setNames += keys[KEY_NAMES].text;
-				appendClause(clauses, setNames.c_str(), setValues.ISQL_charset, SINGLE_QUOTE);
-			}
-
-			if (toks.getCount() > 3)
-				modifiedCreateStatement.insert(toks[3].origin, clauses);
-			else
-				modifiedCreateStatement += clauses;
-		}
-
-		// execute the create statement
-		// If the isqlGlob.SQL_dialect is not set or set to 2, create the database
-		// as a dialect 3 database.
-		unsigned dialect =
-			(isqlGlob.SQL_dialect == 0 || isqlGlob.SQL_dialect == SQL_DIALECT_V6_TRANSITION) ?
-				requested_SQL_dialect : isqlGlob.SQL_dialect;
-
-		DB = Firebird::UtilInterfacePtr()->executeCreateDatabase(fbStatus, modifiedCreateStatement.length(),
-			modifiedCreateStatement.c_str(), dialect, NULL);
-
-		if ((!DB) && (createWithoutRole == 0) && (fbStatus->getErrors()[1] == isc_dsql_error))
-		{
-			// OLd server failed to parse ROLE clause
-			continue;
-		}
+		DB = fbProvider->createDatabase(fbStatus, database.c_str(), dpb.getBufferLength(), dpb.getBuffer());
 
 		if (ISQL_errmsg(fbStatus))
 		{
 			ret = FAIL;
 		}
-		break;
 	}
 
 	if (DB)
@@ -4295,17 +4205,8 @@ static processing_state create_db(const TEXT* statement, TEXT* d_name)
 		// No use in cancel when running non-end-user operators
 		DB->cancelOperation(fbStatus, fb_cancel_disable);
 
-		// Load isqlGlob.global_Db_name with some value to show a successful attach
-
-		// CVC: Someone may decide to play strange games with undocumented ability
-		// to write crap between CREATE DATABASE and the db name, as described by
-		// Helen on CORE-932. Let's see if we can discover the real db name.
-		Firebird::string s;
-		if (toks.getCount() > 2)
-			s.assign(toks[2].text, toks[2].length);
-		else
-			s = d_name;
-		strip_quotes(s.c_str(), isqlGlob.global_Db_name);
+		// Load isqlGlob.global_Db_name and pray that nobody enter database name longer than MAXPATHLEN
+		strcpy(isqlGlob.global_Db_name, database.c_str());
 
 		ISQL_get_version(true);
 

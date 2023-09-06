@@ -569,21 +569,19 @@ void UtilInterface::getFbVersion(CheckStatusWrapper* status, IAttachment* att,
 	}
 }
 
-YAttachment* UtilInterface::executeCreateDatabase(
+Firebird::IAttachment* UtilInterface::executeCreateDatabase(
 	Firebird::CheckStatusWrapper* status, unsigned stmtLength, const char* creatDBstatement,
 	unsigned dialect, FB_BOOLEAN* stmtIsCreateDb)
 {
 	try
 	{
-		YAttachment* att = NULL;
-
 		if (stmtIsCreateDb)
 			*stmtIsCreateDb = FB_FALSE;
 
-		string statement(creatDBstatement,
-			(stmtLength == 0 && creatDBstatement ? static_cast<string::size_type>(strlen(creatDBstatement)) : stmtLength));
+		string database;
+		Firebird::ClumpletWriter dpb(Firebird::ClumpletReader::dpbList, MAX_DPB_SIZE);
 
-		if (!PREPARSE_execute(status, &att, statement, dialect))
+		if (!Preparse::createDatabase(status, creatDBstatement, stmtLength, dpb, database, dialect))
 			return NULL;
 
 		if (stmtIsCreateDb)
@@ -592,7 +590,10 @@ YAttachment* UtilInterface::executeCreateDatabase(
 		if (status->getState() & Firebird::IStatus::STATE_ERRORS)
 			return NULL;
 
-		return att;
+		RefPtr<Why::Dispatcher> dispatcher(FB_NEW Why::Dispatcher);
+
+		return dispatcher->createDatabase(status, database.c_str(),
+			dpb.getBufferLength(), dpb.getBuffer());
 	}
 	catch (const Exception& ex)
 	{

@@ -674,7 +674,7 @@ public:
 		Firebird::ITransaction* tra, const char* file, FB_BOOLEAN txt);
 	void getPerfCounters(Firebird::CheckStatusWrapper* status, Firebird::IAttachment* att,
 		const char* countersSet, ISC_INT64* counters);			// in perf.cpp
-	YAttachment* executeCreateDatabase(Firebird::CheckStatusWrapper* status,
+	Firebird::IAttachment* executeCreateDatabase(Firebird::CheckStatusWrapper* status,
 		unsigned stmtLength, const char* creatDBstatement, unsigned dialect,
 		FB_BOOLEAN* stmtIsCreateDb = NULL);
 	void decodeDate(ISC_DATE date, unsigned* year, unsigned* month, unsigned* day);

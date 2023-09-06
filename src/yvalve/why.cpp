@@ -2335,13 +2335,13 @@ ISC_STATUS API_ROUTINE isc_dsql_exec_immed2(ISC_STATUS* userStatus, isc_db_handl
 	try
 	{
 		FB_BOOLEAN stmtIsCrDb = FB_FALSE;
-		YAttachment* att = utilInterface.executeCreateDatabase(&statusWrapper, stmtLength,
+		IAttachment* att = utilInterface.executeCreateDatabase(&statusWrapper, stmtLength,
 			sqlStmt, dialect, &stmtIsCrDb);
 
 		if (stmtIsCrDb)
 		{
 			if (!(status.getState() & IStatus::STATE_ERRORS))
-				*dbHandle = att->getHandle();
+				fb_get_database_handle(userStatus, dbHandle, att);
 
 			return status[1];
 		}
@@ -2403,13 +2403,13 @@ ISC_STATUS API_ROUTINE isc_dsql_exec_immed2_m(ISC_STATUS* userStatus, isc_db_han
 	CheckStatusWrapper statusWrapper(&status);
 
 	FB_BOOLEAN stmtIsCrDb = FB_FALSE;
-	YAttachment* att = utilInterface.executeCreateDatabase(&statusWrapper, stmtLength,
+	IAttachment* att = utilInterface.executeCreateDatabase(&statusWrapper, stmtLength,
 		sqlStmt, dialect, &stmtIsCrDb);
 
 	if (stmtIsCrDb)
 	{
 		if (!(status.getState() & IStatus::STATE_ERRORS))
-			*dbHandle = att->getHandle();
+			fb_get_database_handle(userStatus, dbHandle, att);
 
 		return status[1];
 	}

@@ -190,6 +190,7 @@
     <ClCompile Include="..\..\..\src\isql\iutils.cpp" />
     <ClCompile Include="..\..\..\src\isql\OptionsBase.cpp" />
     <ClCompile Include="..\..\..\gen\isql\show.cpp" />
+    <ClCompile Include="..\..\..\src\yvalve\preparse.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\..\src\isql\extract.epp" />
@@ -206,6 +207,7 @@
     <ClInclude Include="..\..\..\src\isql\iutils_proto.h" />
     <ClInclude Include="..\..\..\src\isql\OptionsBase.h" />
     <ClInclude Include="..\..\..\src\isql\show_proto.h" />
+    <ClInclude Include="..\..\..\src\yvalve\prepa_proto.h" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="..\..\..\src\jrd\version.rc">
