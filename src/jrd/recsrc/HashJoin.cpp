@@ -249,11 +249,10 @@ private:
 };
 
 
-HashJoin::HashJoin(thread_db* tdbb, CompilerScratch* csb,
-				   JoinType joinType, NestConst<BoolExprNode> joinBoolean,
+HashJoin::HashJoin(thread_db* tdbb, CompilerScratch* csb, JoinType joinType,
 				   FB_SIZE_T count, RecordSource* const* args, NestValueArray* const* keys,
 				   double selectivity)
-	: Join(csb, count, joinType, joinBoolean),
+	: Join(csb, count, joinType),
 	  m_subs(csb->csb_pool, count - 1)
 {
 	fb_assert(count >= 2);
@@ -262,10 +261,10 @@ HashJoin::HashJoin(thread_db* tdbb, CompilerScratch* csb,
 }
 
 HashJoin::HashJoin(thread_db* tdbb, CompilerScratch* csb,
-				   NestConst<BoolExprNode> joinBoolean, NestConst<BoolExprNode> outerBoolean,
+				   BoolExprNode* boolean,
 				   RecordSource* const* args, NestValueArray* const* keys,
 				   double selectivity)
-	: Join(csb, 2, JoinType::OUTER, joinBoolean, outerBoolean),
+	: Join(csb, 2, JoinType::OUTER, boolean),
 	  m_subs(csb->csb_pool, 1)
 {
 	init(tdbb, csb, 2, args, keys, selectivity);
@@ -420,7 +419,7 @@ bool HashJoin::internalGetRecord(thread_db* tdbb) const
 			if (!m_leader.source->getRecord(tdbb))
 				return false;
 
-			if (!checkOuterBoolean(tdbb))
+			if (m_boolean && m_boolean->execute(tdbb, request) != TriState(true))
 			{
 				// The boolean pertaining to the left sub-stream is false
 				// so just join sub-stream to a null valued right sub-stream
@@ -640,30 +639,35 @@ ULONG HashJoin::computeHash(thread_db* tdbb,
 
 bool HashJoin::fetchRecord(thread_db* tdbb, Impure* impure, FB_SIZE_T stream) const
 {
-	Request* const request = tdbb->getRequest();
 	HashTable* const hashTable = impure->irsb_hash_table;
 
 	const BufferedStream* const arg = m_subs[stream].buffer;
 
+	ULONG position;
+	if (hashTable->iterate(stream, impure->irsb_leader_hash, position))
+	{
+		arg->locate(tdbb, position);
+
+		if (arg->getRecord(tdbb))
+			return true;
+	}
+
+	if (m_joinType == JoinType::SEMI || m_joinType == JoinType::ANTI)
+		return false;
+
 	while (true)
 	{
-		ULONG position;
-		while (hashTable->iterate(stream, impure->irsb_leader_hash, position))
+		if (stream == 0 || !fetchRecord(tdbb, impure, stream - 1))
+			return false;
+
+		hashTable->reset(stream, impure->irsb_leader_hash);
+
+		if (hashTable->iterate(stream, impure->irsb_leader_hash, position))
 		{
 			arg->locate(tdbb, position);
 
-			if (arg->getRecord(tdbb) && checkJoinBoolean(tdbb))
+			if (arg->getRecord(tdbb))
 				return true;
 		}
-
-		if (m_joinType == JoinType::SEMI || m_joinType == JoinType::ANTI)
-			break;
-
-		if (stream == 0 || !fetchRecord(tdbb, impure, stream - 1))
-			break;
-
-		hashTable->reset(stream, impure->irsb_leader_hash);
 	}
-
-	return false;
 }

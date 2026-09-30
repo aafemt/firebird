@@ -57,9 +57,9 @@ NestedLoopJoin::NestedLoopJoin(CompilerScratch* csb, JoinType joinType,
 }
 
 NestedLoopJoin::NestedLoopJoin(CompilerScratch* csb,
-							   NestConst<BoolExprNode> outerBoolean,
-							   RecordSource* outer, RecordSource* inner)
-	: Join(csb, 2, JoinType::OUTER, nullptr, outerBoolean)
+							   RecordSource* outer, RecordSource* inner,
+							   BoolExprNode* boolean)
+	: Join(csb, 2, JoinType::OUTER, boolean)
 {
 	fb_assert(outer && inner);
 
@@ -205,7 +205,7 @@ bool NestedLoopJoin::internalGetRecord(thread_db* tdbb) const
 				if (!outer->getRecord(tdbb))
 					return false;
 
-				if (!checkOuterBoolean(tdbb))
+				if (m_boolean && m_boolean->execute(tdbb, request) != TriState(true))
 				{
 					// The boolean pertaining to the left sub-stream is false
 					// so just join sub-stream to a null valued right sub-stream
