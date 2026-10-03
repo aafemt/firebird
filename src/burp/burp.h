@@ -1228,6 +1228,7 @@ public:
 	Firebird::IRequest*	handles_get_trigger_req_handle1;
 	Firebird::IRequest*	handles_get_trigger_req_handle2;
 	Firebird::IRequest*	handles_get_type_req_handle1;
+	Firebird::IRequest*	handles_get_constant_req_handle1;
 	Firebird::IRequest*	handles_get_user_privilege_req_handle1;
 	Firebird::IRequest*	handles_get_view_req_handle1;
 	Firebird::IRequest* handles_activateIndex_req_handle1;

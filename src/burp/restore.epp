@@ -10689,7 +10689,7 @@ bool get_constants(BurpGlobals* tdgbl)
 	ITransaction* local_trans = tdgbl->global_trans ? tdgbl->global_trans : gds_trans;
 
 	STORE (TRANSACTION_HANDLE local_trans
-			REQUEST_HANDLE tdgbl->handles_get_type_req_handle1)
+			REQUEST_HANDLE tdgbl->handles_get_constant_req_handle1)
 		CONST IN RDB$CONSTANTS
 	{
 		CONST.RDB$PACKAGE_NAME.NULL = TRUE;
