@@ -183,7 +183,8 @@ bool_t xdr_datum( xdr_t* xdrs, const dsc* desc, UCHAR* buffer)
 
 	case dtype_varying:
 		{
-			fb_assert(desc->dsc_length >= sizeof(USHORT));
+			if (desc->dsc_length < sizeof(USHORT))
+				return FALSE;
 			vary* v = reinterpret_cast<vary*>(p);
 			if (!xdr_short(xdrs, reinterpret_cast<SSHORT*>(&v->vary_length)))
 			{
@@ -205,12 +206,16 @@ bool_t xdr_datum( xdr_t* xdrs, const dsc* desc, UCHAR* buffer)
 	    {
 			//SSHORT n;
 			USHORT n;
+			if (desc->dsc_length < 1)
+				return FALSE;
 			if (xdrs->x_op == XDR_ENCODE)
 			{
 				n = MIN(static_cast<ULONG>(strlen(reinterpret_cast<char*>(p))), (ULONG)(desc->dsc_length - 1));
 			}
 			if (!xdr_short(xdrs, reinterpret_cast<SSHORT*>(&n)))
 				return FALSE;
+			n = MIN(n, desc->dsc_length - 1);
+
 			if (!xdr_opaque(xdrs, reinterpret_cast<SCHAR*>(p), n))
 				return FALSE;
 			if (xdrs->x_op == XDR_DECODE)
@@ -444,40 +449,7 @@ bool_t xdr_int128(xdr_t* xdrs, Firebird::Int128* ip)
 #endif
 }
 
-
-bool_t xdr_enum(xdr_t* xdrs, xdr_op* ip)
-{
-/**************************************
- *
- *	x d r _ e n u m
- *
- **************************************
- *
- * Functional description
- *	Map from external to internal representation (or vice versa).
- *
- **************************************/
-	SLONG temp;
-
-	switch (xdrs->x_op)
-	{
-	case XDR_ENCODE:
-		temp = (SLONG) *ip;
-		return PUTLONG(xdrs, &temp);
-
-	case XDR_DECODE:
-		if (!GETLONG(xdrs, &temp))
-			return FALSE;
-		*ip = (xdr_op) temp;
-		return TRUE;
-
-	case XDR_FREE:
-		return TRUE;
-	}
-
-	return FALSE;
-}
-
+// xdr_enum is now a template function in xdr_proto.h
 
 bool_t xdr_float(xdr_t* xdrs, float* ip)
 {

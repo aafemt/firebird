@@ -139,6 +139,7 @@ inline constexpr const char* PLG_LEGACY_SEC_SCHEMA = "PLG$LEGACY_SEC";
 
 // Automatically created security classes for SQL objects.
 // Keep in sync with trig.h
+inline constexpr const char* DATABASE_CLASS				= "SQL$DATABASE";
 inline constexpr const char* DEFAULT_CLASS				= "SQL$DEFAULT";
 inline constexpr const char* SQL_SECCLASS_GENERATOR		= "RDB$SECURITY_CLASS";
 inline constexpr const char* SQL_SECCLASS_PREFIX		= "SQL$";
@@ -154,6 +155,9 @@ inline constexpr int GEN_SECCLASS_PREFIX_LEN			= 4;
 
 inline constexpr const char* PROCEDURES_GENERATOR = "RDB$PROCEDURES";
 inline constexpr const char* FUNCTIONS_GENERATOR = "RDB$FUNCTIONS";
+inline constexpr const char* PACKAGES_GENERATOR = "RDB$PACKAGES";
+
+inline constexpr SLONG RELATIONS_GENERATOR = 13;
 
 // Automatically created check constraints for unnamed PRIMARY and UNIQUE declarations.
 inline constexpr const char* IMPLICIT_INTEGRITY_PREFIX = "INTEG_";
@@ -205,6 +209,13 @@ inline constexpr int MAX_INDEX_SEGMENTS = 16;
 // Maximum index key length (must be in sync with MAX_PAGE_SIZE in ods.h)
 inline constexpr ULONG MAX_KEY = 8192; // Maximum page size possible divide by 4 (MAX_PAGE_SIZE / 4)
 
+// RDB$INDICES.RDB$UNIQUE_FLAG values
+inline constexpr SSHORT IDX_UNIQUE			= 0x01;		// Unique index
+inline constexpr SSHORT IDX_NOT_VALIDATED	= 0x02;		// Unique not validated
+
+inline constexpr SSHORT IDX_UNIQUE_NOT_VALIDATED = IDX_UNIQUE | IDX_NOT_VALIDATED;
+
+
 inline constexpr USHORT SQL_MATCH_1_CHAR	= '_';
 inline constexpr USHORT SQL_MATCH_ANY_CHARS	= '%';
 
@@ -220,6 +231,14 @@ inline constexpr size_t DEFAULT_TIME_PRECISION		= 0;
 // Should be 6 as per SQL spec
 inline constexpr size_t DEFAULT_TIMESTAMP_PRECISION	= 3;
 
+// SQL spec requires an implementation-specific default (6.1 <data type>, syntax rules 6 (VARBINARY) and 7 (VARCHAR))
+inline constexpr size_t DEFAULT_VARCHAR_LENGTH = 255;
+inline constexpr size_t DEFAULT_VARBINARY_LENGTH = 255;
+
+// SQL spec requires a default length of 1 (6.1 <data type>, syntax rule 5)
+inline constexpr size_t DEFAULT_CHAR_LENGTH = 1;
+inline constexpr size_t DEFAULT_BINARY_LENGTH = 1;
+
 inline constexpr size_t MAX_ARRAY_DIMENSIONS = 16;
 
 inline constexpr size_t MAX_SORT_ITEMS = 255; // ORDER BY f1,...,f255
@@ -233,8 +252,8 @@ enum rel_t {
 	rel_view = 1,
 	rel_external = 2,
 	rel_virtual = 3,
-	rel_global_temp_preserve = 4,
-	rel_global_temp_delete = 5
+	rel_temp_preserve = 4,
+	rel_temp_delete = 5
 };
 
 // procedure types
@@ -341,7 +360,7 @@ enum TriggerAction
 	TRIGGER_UPDATE = 2,
 	TRIGGER_DELETE = 3,
 	TRIGGER_CONNECT = 4,
-	TRIGGER_DISCONNECT  = 5,
+	TRIGGER_DISCONNECT = 5,
 	TRIGGER_TRANS_START = 6,
 	TRIGGER_TRANS_COMMIT = 7,
 	TRIGGER_TRANS_ROLLBACK = 8,
@@ -360,7 +379,8 @@ inline constexpr unsigned DB_TRIGGER_DISCONNECT		= 1;
 inline constexpr unsigned DB_TRIGGER_TRANS_START	= 2;
 inline constexpr unsigned DB_TRIGGER_TRANS_COMMIT	= 3;
 inline constexpr unsigned DB_TRIGGER_TRANS_ROLLBACK	= 4;
-inline constexpr unsigned DB_TRIGGER_MAX			= 5;
+inline constexpr unsigned DB_TRIGGER_DDL			= 5;
+inline constexpr unsigned DB_TRIGGERS_COUNT			= 6;
 
 static inline constexpr const char* DDL_TRIGGER_ACTION_NAMES[][2] =
 {
@@ -504,5 +524,8 @@ inline constexpr int WITH_ADMIN_OPTION = 2;
 
 // Max length of the string returned by ERROR_TEXT context variable
 inline constexpr USHORT MAX_ERROR_MSG_LENGTH = 1024 * METADATA_BYTES_PER_CHAR; // 1024 UTF-8 characters
+
+// Prefix of index that's getting dropped
+inline constexpr const char* TEMP_DEPEND = "RDB$TEMP_DEPEND";
 
 #endif // JRD_CONSTANTS_H

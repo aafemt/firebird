@@ -58,16 +58,13 @@
 
 #include <memory.h>
 #include <memory>
-
 #ifdef DEBUG_GDS_ALLOC
-#define FB_NEW new(*getDefaultMemoryPool(), __FILE__, __LINE__)
-#define FB_NEW_POOL(pool) new(pool, __FILE__, __LINE__)
-#define FB_NEW_RPT(pool, count) new(pool, count, __FILE__, __LINE__)
-#else // DEBUG_GDS_ALLOC
+#include "../common/StdHelper.h"
+#endif
+
 #define FB_NEW new(*getDefaultMemoryPool())
 #define FB_NEW_POOL(pool) new(pool)
 #define FB_NEW_RPT(pool, count) new(pool, count)
-#endif // DEBUG_GDS_ALLOC
 
 namespace Firebird {
 
@@ -178,21 +175,32 @@ public:
 	static MemoryPool* defaultMemoryManager;
 	static MemoryPool* externalMemoryManager;
 
+	const void* mp() const
+	{
+		return pool;
+	}
+
 public:
+#ifdef DEBUG_GDS_ALLOC
+#define ALLOC_PARAMS , const Firebird::CustomSourceLocation location = Firebird::CustomSourceLocation::current()
+#define ALLOC_PARAMS_NO_COMMA const Firebird::CustomSourceLocation location = Firebird::CustomSourceLocation::current()
+#define ALLOC_PARAMS_DEF , const Firebird::CustomSourceLocation location
+#define ALLOC_PARAMS_NO_COMMA_DEF const Firebird::CustomSourceLocation location
+#define ALLOC_PASS_ARGS , location
+#define ALLOC_PASS_ARGS_NO_COMMA location
+#else
+#define ALLOC_PARAMS
+#define ALLOC_PARAMS_NO_COMMA
+#define ALLOC_PARAMS_DEF
+#define ALLOC_PARAMS_NO_COMMA_DEF
+#define ALLOC_PASS_ARGS
+#define ALLOC_PASS_ARGS_NO_COMMA
+#endif // DEBUG_GDS_ALLOC
+
 	// Create memory pool instance
-	static MemoryPool* createPool(MemoryPool* parent = NULL, MemoryStats& stats = *default_stats_group);
+	static MemoryPool* createPool(MemoryPool* parent = NULL, MemoryStats& stats = *default_stats_group ALLOC_PARAMS);
 	// Delete memory pool instance
 	static void deletePool(MemoryPool* pool);
-
-#ifdef DEBUG_GDS_ALLOC
-#define ALLOC_ARGS , __FILE__, __LINE__
-#define ALLOC_PARAMS , const char* file, int line
-#define ALLOC_PASS_ARGS , file, line
-#else
-#define ALLOC_ARGS
-#define ALLOC_PARAMS
-#define ALLOC_PASS_ARGS
-#endif // DEBUG_GDS_ALLOC
 
 	void* calloc(size_t size ALLOC_PARAMS);
 
@@ -348,6 +356,7 @@ public:
 		savedThreadData(subThreadData),
 		savedPool(savedThreadData->getDefaultPool())
 	{
+		fb_assert(newPool);
 		savedThreadData->setDefaultPool(newPool);
 	}
 
@@ -377,27 +386,21 @@ inline void* operator new[](size_t s, Firebird::MemoryPool& pool ALLOC_PARAMS)
 	return pool.allocate(s ALLOC_PASS_ARGS);
 }
 
-inline void operator delete(void* mem, Firebird::MemoryPool& pool ALLOC_PARAMS) noexcept
+inline void operator delete(void* mem, Firebird::MemoryPool& pool ALLOC_PARAMS_DEF) noexcept
 {
 	MemoryPool::globalFree(mem);
 }
 
-inline void operator delete[](void* mem, Firebird::MemoryPool& pool ALLOC_PARAMS) noexcept
+inline void operator delete[](void* mem, Firebird::MemoryPool& pool ALLOC_PARAMS_DEF) noexcept
 {
 	MemoryPool::globalFree(mem);
 }
-
-#ifdef DEBUG_GDS_ALLOC
 
 extern void operator delete(void* mem) noexcept;
 extern void operator delete[](void* mem) noexcept;
 
-#if __cplusplus >= 201402L
 extern void operator delete(void* mem, std::size_t s) noexcept;
 extern void operator delete[](void* mem, std::size_t s) noexcept;
-#endif
-
-#endif // DEBUG_GDS_ALLOC
 
 namespace Firebird
 {
@@ -478,7 +481,19 @@ namespace Firebird
 		using void_pointer = void* ;
 		using const_void_pointer = const void*;
 		using difference_type = std::ptrdiff_t;
-		using is_always_equal = std::true_type;
+
+		// We are using stateful allocator, so they are not always equal by definition.
+		using is_always_equal = std::false_type;
+
+		// Do not propagate allocator on any type of assignment or swap (but remember, swap on two objects with
+		// different allocators is UB if swap propagation is false, so be careful with it), because it can lead
+		// to accidental misuse or undesired behavior, e.g.:
+		// `std::string str1(default_pool, std::move(std::string(req_pool, "some string")));`
+		// Where `str1` will borrow a pointer from `req_pool`, but `str1` can live longer then `req_pool`, so
+		// when `req_pool` is gone, we will have a dead pointer.
+		using propagate_on_container_copy_assignment = std::false_type;
+		using propagate_on_container_move_assignment = std::false_type;
+		using propagate_on_container_swap = std::false_type;
 
 		template <typename U>
 		struct rebind
@@ -506,7 +521,7 @@ namespace Firebird
 	public:
 		constexpr pointer allocate(size_type n, const void* hint = nullptr)
 		{
-			return static_cast<T*>(pool.allocate(n * sizeof(T) ALLOC_ARGS));
+			return static_cast<T*>(pool.allocate(n * sizeof(T)));
 		}
 
 		constexpr void deallocate(pointer p, size_type n)
@@ -548,59 +563,6 @@ namespace Firebird
 		MemoryPool& pool;
 	};
 } // namespace Firebird
-
-
-template <typename TAlloc>
-struct std::allocator_traits<Firebird::PoolAllocator<TAlloc>>
-{
-	using Alloc = Firebird::PoolAllocator<TAlloc>;
-
-	using allocator_type = Alloc;
-	using value_type = typename Alloc::value_type;
-	using pointer = typename Alloc::pointer;
-	using const_pointer = typename Alloc::const_pointer;
-	using void_pointer = typename Alloc::void_pointer;
-	using const_void_pointer = typename Alloc::const_void_pointer;
-	using size_type = typename Alloc::size_type;
-	using difference_type = typename Alloc::difference_type;
-	using reference = value_type&;
-	using const_reference = const value_type&;
-
-	using is_always_equal = typename Alloc::is_always_equal;
-
-	template <typename T>
-	using rebind_alloc = typename Alloc::template rebind<T>::other;
-
-	template <typename T>
-	using rebind_traits = allocator_traits<rebind_alloc<T>>;
-
-	static constexpr pointer allocate(Alloc& alloc, size_type size)
-	{
-		return alloc.allocate(size);
-	}
-
-	static constexpr void deallocate(Alloc& alloc, pointer ptr, size_type size)
-	{
-		alloc.deallocate(ptr, size);
-	}
-
-	template <typename T, typename... Args>
-	static constexpr void construct(Alloc& alloc, T* ptr, Args&&... args)
-	{
-		alloc.construct(ptr, std::forward<Args>(args)...);
-	}
-
-	template <typename T>
-	static constexpr void destroy(Alloc& alloc, T* ptr)
-	{
-		alloc.destroy(ptr);
-	}
-
-	static constexpr size_type max_size(const Alloc& alloc) noexcept
-	{
-		return alloc.max_size();
-	}
-};
 
 
 #endif // CLASSES_ALLOC_H

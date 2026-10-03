@@ -269,11 +269,15 @@ VoidPtr API_ROUTINE gds__alloc_debug(SLONG size_request, const TEXT* filename, U
 {
 	try
 	{
-		return getDefaultMemoryPool()->allocate(size_request
 #ifdef DEBUG_GDS_ALLOC
-			, filename, lineno
+		Firebird::CustomSourceLocation location{
+			.fileName = filename,
+			.line = static_cast<int>(lineno)
+		};
+		return getDefaultMemoryPool()->allocate(size_request, location);
+#else
+		return getDefaultMemoryPool()->allocate(size_request);
 #endif
-		);
 	}
 	catch (const Firebird::Exception&)
 	{
@@ -328,6 +332,7 @@ constexpr int op_invsel_procedure	= 34;
 constexpr int op_table_value_fun	= 35;
 constexpr int op_for_range		= 36;
 constexpr int op_within_group_order	= 37;
+constexpr int op_custom_agg_function	= 38;
 
 static constexpr UCHAR
 	// generic print formats
@@ -356,6 +361,7 @@ static constexpr UCHAR
 	relation2[] = { op_byte, op_literal, op_line, op_indent, op_byte,
 					op_literal, op_pad, op_byte, op_line, 0},
 	relation3[] = { op_line, op_indent, op_byte, op_literal,
+					op_line, op_indent, op_byte, op_literal,
 					op_line, op_indent, op_byte, op_literal,
 					op_line, op_indent, op_byte, op_literal,
 					op_line, op_indent, op_byte, op_line, 0},
@@ -436,7 +442,8 @@ static constexpr UCHAR
 				   op_line, op_indent, op_byte, op_literal,
 				   op_pad, op_line, 0 },
 	list_function[] = { op_line, op_verb, op_verb, op_within_group_order, 0 },
-	agg_function[] = { op_byte, op_literal, op_byte, op_line, op_args, op_within_group_order, 0 };
+	agg_function[] = { op_byte, op_literal, op_byte, op_line, op_args, op_within_group_order, 0 },
+	custom_agg_function[] = { op_custom_agg_function, 0 };
 
 
 #include "../jrd/blp.h"
@@ -1113,10 +1120,10 @@ public:
 
 	~LogFileHandles()
 	{
-		if (mutex_handle != INVALID_HANDLE_VALUE)
+		if (mutex_handle != NULL)
 			CloseHandle(mutex_handle);
 
-		mutex_handle = INVALID_HANDLE_VALUE;
+		mutex_handle = NULL;
 
 		if (file_handle != INVALID_HANDLE_VALUE)
 			CloseHandle(file_handle);
@@ -1175,7 +1182,7 @@ void LogFileHandles::trace_raw(const char* text, unsigned int length)
 
 Firebird::InitInstance<LogFileHandles> logFileHandles;
 
-HANDLE LogFileHandles::mutex_handle = INVALID_HANDLE_VALUE;
+HANDLE LogFileHandles::mutex_handle = NULL;
 HANDLE LogFileHandles::file_handle = INVALID_HANDLE_VALUE;
 
 
@@ -3844,7 +3851,7 @@ static void blr_print_verb(gds_ctl* control, SSHORT level)
 			if (n != SUB_ROUTINE_TYPE_PSQL)
 				blr_error(control, "*** unknown subroutine type %d ***", (int) n);
 
-			// Procedure: prc_executable / prc_selectable; Function: deterministic
+			// Procedure: prc_executable / prc_selectable; Function: deterministic / aggregate
 			offset = blr_print_line(control, (SSHORT) offset);
 			blr_indent(control, level);
 			n = blr_print_byte(control);
@@ -4026,7 +4033,10 @@ static void blr_print_verb(gds_ctl* control, SSHORT level)
 			static const char* subCodes[] =
 			{
 				nullptr,
-				"format"
+				"format",
+				"ltt",
+				"field_names",
+				"index"
 			};
 
 			while ((blr_operator = control->ctl_blr_reader.getByte()) != blr_end)
@@ -4040,6 +4050,10 @@ static void blr_print_verb(gds_ctl* control, SSHORT level)
 
 				switch (blr_operator)
 				{
+					case blr_dcl_local_table_ltt:
+						offset = blr_print_line(control, offset);
+						break;
+
 					case blr_dcl_local_table_format:
 						n = blr_print_word(control);
 						offset = blr_print_line(control, offset);
@@ -4049,6 +4063,38 @@ static void blr_print_verb(gds_ctl* control, SSHORT level)
 						{
 							blr_indent(control, level);
 							blr_print_dtype(control);
+							offset = blr_print_line(control, offset);
+						}
+
+						--level;
+						break;
+
+					case blr_dcl_local_table_field_names:
+						n = blr_print_word(control);
+						offset = blr_print_line(control, offset);
+						++level;
+
+						while (--n >= 0)
+						{
+							blr_indent(control, level);
+							blr_print_name(control);
+							offset = blr_print_line(control, offset);
+						}
+
+						--level;
+						break;
+
+					case blr_dcl_local_table_index:
+						blr_print_name(control);
+						blr_print_byte(control);
+						n = blr_print_byte(control);
+						offset = blr_print_line(control, offset);
+						++level;
+
+						while (--n >= 0)
+						{
+							blr_indent(control, level);
+							blr_print_word(control);
 							offset = blr_print_line(control, offset);
 						}
 
@@ -4074,7 +4120,8 @@ static void blr_print_verb(gds_ctl* control, SSHORT level)
 			{
 				nullptr,
 				"message",
-				"variable"
+				"variable",
+				"local_table"
 			};
 
 			while ((blr_operator = control->ctl_blr_reader.getByte()) != blr_end)
@@ -4090,6 +4137,7 @@ static void blr_print_verb(gds_ctl* control, SSHORT level)
 				{
 					case blr_outer_map_message:
 					case blr_outer_map_variable:
+					case blr_outer_map_local_table:
 						blr_print_word(control);
 						n = blr_print_word(control);
 						offset = blr_print_line(control, offset);
@@ -4188,6 +4236,107 @@ static void blr_print_verb(gds_ctl* control, SSHORT level)
 							blr_print_verb(control, level);
 
 						--level;
+						break;
+
+					default:
+						fb_assert(false);
+				}
+			}
+
+			// print blr_end
+			control->ctl_blr_reader.seekBackward(1);
+			blr_print_verb(control, level);
+			break;
+		}
+
+		case op_custom_agg_function:
+		{
+			offset = blr_print_line(control, offset);
+
+			static const char* subCodes[] =
+			{
+				nullptr,
+				"id",
+				"arg_names",
+				"args",
+				"filter"
+			};
+
+			static const char* idSubCodes[] =
+			{
+				nullptr,
+				"schema",
+				"package",
+				"name",
+				"sub"
+			};
+
+			while ((blr_operator = control->ctl_blr_reader.getByte()) != blr_end)
+			{
+				blr_indent(control, level);
+
+				if (blr_operator == 0 || blr_operator >= FB_NELEM(subCodes))
+					blr_error(control, "*** invalid blr_invoke_agg_function sub code ***");
+
+				blr_format(control, "blr_invoke_agg_function_%s, ", subCodes[blr_operator]);
+
+				switch (blr_operator)
+				{
+					case blr_invoke_agg_function_id:
+						++level;
+
+						while ((n = control->ctl_blr_reader.getByte()) != blr_end)
+						{
+							if (n == 0 || n >= static_cast<FB_SSIZE_T>(FB_NELEM(idSubCodes)))
+								blr_error(control, "*** invalid blr_invoke_agg_function_id sub code ***");
+
+							offset = blr_print_line(control, (SSHORT) offset);
+							blr_indent(control, level + 1);
+							blr_format(control, "blr_invoke_agg_function_id_%s, ", idSubCodes[n]);
+
+							if (n == blr_invoke_agg_function_id_schema ||
+								n == blr_invoke_agg_function_id_package ||
+								n == blr_invoke_agg_function_id_name)
+							{
+								blr_print_name(control);
+							}
+						}
+
+						offset = blr_print_line(control, (SSHORT) offset);
+						--level;
+						break;
+
+					case blr_invoke_agg_function_arg_names:
+						n = blr_print_word(control);
+						offset = blr_print_line(control, offset);
+
+						++level;
+
+						while (n-- > 0)
+						{
+							blr_indent(control, level);
+							blr_print_name(control);
+							offset = blr_print_line(control, (SSHORT) offset);
+						}
+
+						--level;
+						break;
+
+					case blr_invoke_agg_function_args:
+						n = blr_print_word(control);
+						offset = blr_print_line(control, offset);
+
+						++level;
+
+						while (n-- > 0)
+							blr_print_verb(control, level);
+
+						--level;
+						break;
+
+					case blr_invoke_agg_function_filter:
+						offset = blr_print_line(control, (SSHORT) offset);
+						blr_print_verb(control, level);
 						break;
 
 					default:
@@ -4568,7 +4717,7 @@ VoidPtr API_ROUTINE gds__alloc(SLONG size_request)
 {
 	try
 	{
-		return getDefaultMemoryPool()->allocate(size_request ALLOC_ARGS);
+		return getDefaultMemoryPool()->allocate(size_request);
 	}
 	catch (const Firebird::Exception&)
 	{

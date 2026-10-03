@@ -36,8 +36,9 @@
 #include "../common/classes/PodOptional.h"
 #include "../common/classes/TriState.h"
 #include "../common/classes/stack.h"
+#include "../jrd/intl.h"
 
-#include "gen/parse.h"
+#include "parse.h"
 
 namespace Firebird {
 class CharSet;
@@ -101,7 +102,7 @@ private:
 		const TEXT* line_start;
 		const TEXT* last_token_bk;
 		const TEXT* line_start_bk;
-		SSHORT charSetId;
+		CSetId charSetId;
 		SLONG lines, lines_bk;
 		int prev_keyword;
 		USHORT param_number;
@@ -134,7 +135,7 @@ public:
 public:
 	Parser(thread_db* tdbb, MemoryPool& pool, MemoryPool* aStatementPool, DsqlCompilerScratch* aScratch,
 		USHORT aClientDialect, USHORT aDbDialect, bool aRequireSemicolon,
-		const TEXT* string, size_t length, SSHORT charSetId);
+		const TEXT* string, size_t length, CSetId charSetId);
 	~Parser();
 
 public:
@@ -357,6 +358,14 @@ private:
 			setClause(fld->collate, "COLLATE", *name);
 	}
 	void checkTimeDialect();
+
+	void exceptionNumericLiterals(const Firebird::string& text)
+	{
+		using namespace Firebird;
+		ERRD_post(Arg::Gds(isc_sqlerr) << Arg::Num(-104) << Arg::Gds(isc_dsql_token_unk_err)
+									   << Arg::Num(yyposn.firstLine) << Arg::Num(yyposn.firstColumn)
+									   << Arg::Gds(isc_random) << Arg::Str(text));
+	}
 
 // start - defined in btyacc_fb.ske
 private:

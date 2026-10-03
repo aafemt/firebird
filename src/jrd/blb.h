@@ -28,6 +28,7 @@
 #define JRD_BLB_H
 
 #include "../include/fb_blk.h"
+#include "../intl/charsets.h"
 
 #include "../jrd/RecordNumber.h"
 #include "../jrd/EngineInterface.h"
@@ -38,6 +39,7 @@
 #include "firebird/Interface.h"
 #include "../common/classes/ImplementHelper.h"
 #include "../common/dsc.h"
+#include "../jrd/Resources.h"
 
 namespace Ods
 {
@@ -51,6 +53,7 @@ namespace Jrd
 class Attachment;
 class BlobControl;
 class jrd_rel;
+class RelationPermanent;
 class Request;
 class jrd_tra;
 class vcl;
@@ -75,11 +78,11 @@ public:
 	jrd_rel* blb_relation = nullptr; // Relation, if known
 	JBlob* blb_interface = nullptr;
 
-	FB_UINT64 blb_length = 0;	// Blob's total length (in bytes)
-	USHORT blb_flags = 0;		// Interesting stuff (see below)
+	FB_UINT64 blb_length = 0;		// Blob's total length (in bytes)
+	USHORT blb_flags = 0;			// Interesting stuff (see below)
 
 	SSHORT blb_sub_type = isc_blob_untyped; // Blob's declared sub-type
-	UCHAR blb_charset = 0;		// Blob's charset
+	CSetId blb_charset = CS_NONE;	// Blob's charset
 
 	// inline functions
 	bool hasBuffer() const;
@@ -101,23 +104,29 @@ public:
 	void	BLB_check_well_formed(thread_db*, const dsc* desc);
 	bool	BLB_close(thread_db*);
 	static blb*	create(thread_db*, jrd_tra*, bid*);
-	static blb*	create2(thread_db*, jrd_tra*, bid*, USHORT, const UCHAR*, bool = false);
-	static Jrd::blb* get_array(Jrd::thread_db*, Jrd::jrd_tra*, const Jrd::bid*, Ods::InternalArrayDesc*);
+	static blb* create2(thread_db*, jrd_tra*, bid*, USHORT, const UCHAR*, bool = false);
+	static blb* get_array(thread_db*, jrd_tra*, const bid*, Ods::InternalArrayDesc*);
 	ULONG	BLB_get_data(thread_db*, UCHAR*, SLONG, bool = true);
 	USHORT	BLB_get_segment(thread_db*, void*, USHORT);
-	static SLONG get_slice(Jrd::thread_db*, Jrd::jrd_tra*, const Jrd::bid*, const UCHAR*, USHORT,
+	static SLONG get_slice(thread_db*, jrd_tra*, const bid*, const UCHAR*, USHORT,
 					const UCHAR*, SLONG, UCHAR*);
 	SLONG	BLB_lseek(USHORT, SLONG);
-	static void	move(thread_db* tdbb, dsc* from_desc, dsc* to_desc, jrd_rel* relation = nullptr, Record* record = nullptr, USHORT fieldId = 0, bool bulk = false);
+	static void	move(thread_db* tdbb, dsc* from_desc, dsc* to_desc, jrd_rel* = nullptr, Record* record = nullptr, USHORT fieldId = 0, bool bulk = false);
 	static blb* open(thread_db*, jrd_tra*, const bid*);
 	static blb* open2(thread_db*, jrd_tra*, const bid*, USHORT, const UCHAR*, bool = false);
 	void	BLB_put_data(thread_db*, const UCHAR*, SLONG);
 	void	BLB_put_segment(thread_db*, const void*, USHORT);
 	static void	put_slice(thread_db*, jrd_tra*, bid*, const UCHAR*, USHORT, const UCHAR*, SLONG, UCHAR*);
-	static void release_array(Jrd::ArrayField*);
-	static void scalar(Jrd::thread_db*, Jrd::jrd_tra*, const Jrd::bid*, USHORT, const SLONG*, Jrd::impure_value*);
+	static void release_array(ArrayField*);
 
-	static void delete_blob_id(thread_db*, const bid*, ULONG, jrd_rel*);
+	// Release ArrayFields created on the request-less fast-path (arr_request
+	// == nullptr), e.g. arrays belonging to records skipped after a conversion
+	// failure. Safe to call after a batch: future batches have not created their
+	// arrays yet, so all remaining request-less arrays belong to processed records.
+	static void releaseRequestlessArrays(jrd_tra* transaction);
+	static void scalar(thread_db*, jrd_tra*, const bid*, USHORT, const SLONG*, impure_value*);
+
+	static void delete_blob_id(thread_db*, const bid*, ULONG, Jrd::jrd_rel*);
 	void fromPageHeader(const Ods::blh* header);
 	void toPageHeader(Ods::blh* header) const;
 	void getFromPage(USHORT length, const UCHAR* data);
@@ -179,8 +188,8 @@ inline constexpr int BLB_damaged		= 16;		// Blob is busted
 inline constexpr int BLB_seek			= 32;		// Seek is pending
 inline constexpr int BLB_large_scan		= 64;		// Blob is larger than page buffer cache
 inline constexpr int BLB_close_on_read	= 128;		// Temporary blob is not closed until read
-inline constexpr int BLB_bulk			= 256;		// Blob created by bulk insert operation
-inline constexpr int BLB_user			= 512;		// User-defined blob
+inline constexpr int BLB_user			= 256;		// User-defined blob
+inline constexpr int BLB_dltt			= 512;		// Blob stored in a declared local temporary table
 
 /* Blob levels are:
 

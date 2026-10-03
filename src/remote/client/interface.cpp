@@ -72,6 +72,9 @@
 #include "../auth/SecureRemotePassword/client/SrpClient.h"
 #include "../auth/trusted/AuthSspi.h"
 #include "../plugins/crypt/arc4/Arc4.h"
+#if defined(STATIC_CLIENT) && defined(HAVE_TOMCRYPT) && !defined(WITHOUT_TOMCRYPT)
+#include "../plugins/crypt/chacha/ChaCha.h"
+#endif
 #include "BlrFromMessage.h"
 #include "../dsql/DsqlBatch.h"
 
@@ -79,8 +82,20 @@
 #include <unistd.h>
 #endif
 
+#if !defined(WIN_NT)
+#include <sys/socket.h>
+#ifdef HAVE_SYS_UN_H
+#include <sys/un.h>
+#endif
+#endif
+
 #ifdef WIN_NT
+#include <winsock2.h>
 #include <process.h>
+#endif
+
+#if (defined(WIN_NT) && defined(HAVE_AFUNIX_H)) || defined(HAVE_SYS_UN_H)
+#define HAVE_AF_UNIX_SUPPORT
 #endif
 
 #if defined(WIN_NT)
@@ -92,6 +107,10 @@
 const char* const PROTOCOL_INET = "inet";
 const char* const PROTOCOL_INET4 = "inet4";
 const char* const PROTOCOL_INET6 = "inet6";
+
+#ifdef HAVE_AF_UNIX_SUPPORT
+const char* const PROTOCOL_UNIX = "unix";
+#endif
 
 #ifdef WIN_NT
 const char* const PROTOCOL_XNET = "xnet";
@@ -150,7 +169,7 @@ namespace {
 	{
 	public:
 		UseStandardBuffer(cstring& toSave)
-			: UsePreallocatedBuffer(toSave,0, nullptr)
+			: UsePreallocatedBuffer(toSave, 0, nullptr)
 		{ }
 
 		~UseStandardBuffer()
@@ -1100,6 +1119,9 @@ void registerRedirector(IPluginManager* iPlugin)
 #endif
 
 	Crypt::registerArc4(iPlugin);
+#if defined(STATIC_CLIENT) && defined(HAVE_TOMCRYPT) && !defined(WITHOUT_TOMCRYPT)
+	Crypt::registerChaCha(iPlugin);
+#endif
 }
 
 } // namespace Remote
@@ -1166,6 +1188,46 @@ static void authReceiveResponse(bool havePacket, ClntAuthBlock& authItr, rem_por
 	Rdb* rdb, IStatus* status, PACKET* packet, bool checkKeys);
 
 static AtomicCounter remote_event_id;
+
+#ifdef HAVE_AF_UNIX_SUPPORT
+static bool analyzeUnixProtocol(PathName& expandedName, PathName& nodeName)
+{
+	nodeName.erase();
+
+	const PathName prefix = PathName(PROTOCOL_UNIX) + "://";
+
+	if (prefix.length() > expandedName.length())
+		return false;
+
+	if (IgnoreCaseComparator::compare(prefix.c_str(), expandedName.c_str(), prefix.length()) != 0)
+		return false;
+
+	PathName savedName = expandedName;
+	expandedName.erase(0, prefix.length());
+
+	PathName::size_type separator = expandedName.find(':');
+
+#ifdef WIN_NT
+	if (separator == 1)
+	{
+		const char driveLetter = expandedName[0];
+		if ((driveLetter >= 'A' && driveLetter <= 'Z') || (driveLetter >= 'a' && driveLetter <= 'z'))
+			separator = expandedName.find(':', separator + 1);
+	}
+#endif
+
+	if (separator == PathName::npos || separator == 0 || separator == expandedName.length() - 1)
+	{
+		expandedName = savedName;
+		return false;
+	}
+
+	nodeName = expandedName.substr(0, separator);
+	expandedName.erase(0, separator + 1);
+
+	return true;
+}
+#endif
 
 static constexpr unsigned ANALYZE_USER_VFY	= 0x01;
 static constexpr unsigned ANALYZE_LOOPBACK	= 0x02;
@@ -6311,8 +6373,7 @@ IEvents* Attachment::queEvents(CheckStatusWrapper* status, IEventCallback* callb
 			port->connect(packet);
 
 			rem_port* port_async = port->port_async;
-			port_async->port_events_threadId =
-				Thread::start(event_thread, port_async, THREAD_high, &port_async->port_events_thread);
+			Thread::start(event_thread, port_async, THREAD_high, &port_async->port_events_thread);
 
 			port_async->port_context = rdb;
 		}
@@ -7857,6 +7918,8 @@ static void secureAuthentication(ClntAuthBlock& cBlock, rem_port* port)
 	{
 		LocalStatus ls;
 		CheckStatusWrapper st(&ls);
+
+		UseStandardBuffer guard(packet->p_resp.p_resp_data);
 		authReceiveResponse(true, cBlock, port, rdb, &st, packet, true);
 
 		if (st.getState() & IStatus::STATE_ERRORS)
@@ -7920,14 +7983,24 @@ static rem_port* analyze(ClntAuthBlock& cBlock, PathName& attach_name, unsigned 
 			else
 #endif
 
+#ifdef HAVE_AF_UNIX_SUPPORT
+			if (analyzeUnixProtocol(attach_name, node_name))
+			{
+				ISC_utf8ToSystem(node_name);
+				port = INET_analyze(&cBlock, attach_name, node_name.c_str(), flags & ANALYZE_USER_VFY, pb,
+					cBlock.getConfig(), ref_db_name, cryptCb, AF_UNIX);
+			}
+			else
+#endif
+
 			if (ISC_analyze_protocol(PROTOCOL_INET4, attach_name, node_name, INET_SEPARATOR, needFile))
 				inet_af = AF_INET;
 			else if (ISC_analyze_protocol(PROTOCOL_INET6, attach_name, node_name, INET_SEPARATOR, needFile))
 				inet_af = AF_INET6;
 
-			if (inet_af != AF_UNSPEC ||
+			if (!port && (inet_af != AF_UNSPEC ||
 				ISC_analyze_protocol(PROTOCOL_INET, attach_name, node_name, INET_SEPARATOR, needFile) ||
-				ISC_analyze_tcp(attach_name, node_name, needFile))
+				ISC_analyze_tcp(attach_name, node_name, needFile)))
 			{
 				if (node_name.isEmpty())
 					node_name = INET_LOCALHOST;
@@ -8800,37 +8873,6 @@ static void authFillParametersBlock(ClntAuthBlock& cBlock, ClumpletWriter& dpb,
 	}
 }
 
-#ifdef NOT_USED_OR_REPLACED
-static CSTRING* REMOTE_dup_string(const CSTRING* from)
-{
-	if (from && from->cstr_length)
-	{
-		CSTRING* rc = FB_NEW_POOL(*getDefaultMemoryPool()) CSTRING;
-		memset(rc, 0, sizeof(CSTRING));
-		rc->cstr_length = from->cstr_length;
-		rc->cstr_allocated = rc->cstr_length;
-		rc->cstr_address = FB_NEW_POOL(*getDefaultMemoryPool()) UCHAR[rc->cstr_length];
-		memcpy(rc->cstr_address, from->cstr_address, rc->cstr_length);
-		return rc;
-	}
-
-	return NULL;
-}
-
-static void REMOTE_free_string(CSTRING* tmp)
-{
-	if (tmp)
-	{
-		if (tmp->cstr_address)
-		{
-			fb_assert(tmp->cstr_allocated >= tmp->cstr_length);
-			delete[] tmp->cstr_address;
-		}
-		delete tmp;
-	}
-}
-#endif // NOT_USED_OR_REPLACED
-
 static void authReceiveResponse(bool havePacket, ClntAuthBlock& cBlock, rem_port* port,
 	Rdb* rdb, IStatus* status, PACKET* packet, bool checkKeys)
 {
@@ -8998,6 +9040,8 @@ static bool init(CheckStatusWrapper* status, ClntAuthBlock& cBlock, rem_port* po
 			attach->p_atch_file.cstr_address = reinterpret_cast<const UCHAR*>(file_name.c_str());
 			attach->p_atch_dpb.cstr_length = (ULONG) dpb.getBufferLength();
 			attach->p_atch_dpb.cstr_address = dpb.getBuffer();
+
+			UseStandardBuffer guard(packet->p_resp.p_resp_data);
 
 			send_packet(port, packet);
 			try
@@ -10321,9 +10365,9 @@ void ClntAuthBlock::loadClnt(ClumpletWriter& dpb, const ParametersSet* tags)
 
 void ClntAuthBlock::extractDataFromPluginTo(CSTRING* to)
 {
+	to->free();
 	to->cstr_length = (ULONG) dataFromPlugin.getCount();
 	to->cstr_address = dataFromPlugin.begin();
-	to->cstr_allocated = 0;
 }
 
 void ClntAuthBlock::extractDataFromPluginTo(P_AUTH_CONT* to)
@@ -10332,8 +10376,7 @@ void ClntAuthBlock::extractDataFromPluginTo(P_AUTH_CONT* to)
 
 	PathName pluginName = getPluginName();
 	to->p_name.cstr_length = (ULONG) pluginName.length();
-	to->p_name.cstr_address = FB_NEW_POOL(*getDefaultMemoryPool()) UCHAR[to->p_name.cstr_length];
-	to->p_name.cstr_allocated = to->p_name.cstr_length;
+	to->p_name.alloc();
 	memcpy(to->p_name.cstr_address, pluginName.c_str(), to->p_name.cstr_length);
 
 	HANDSHAKE_DEBUG(fprintf(stderr, "Cli: extractDataFromPluginTo: added plugin name (%d) and data (%d)\n",
@@ -10341,9 +10384,9 @@ void ClntAuthBlock::extractDataFromPluginTo(P_AUTH_CONT* to)
 
 	if (firstTime)
 	{
+		to->p_list.free();
 		to->p_list.cstr_length = (ULONG) pluginList.length();
 		to->p_list.cstr_address = (UCHAR*) pluginList.c_str();
-		to->p_list.cstr_allocated = 0;
 		HANDSHAKE_DEBUG(fprintf(stderr,
 			"Cli: extractDataFromPluginTo: added plugin list (%d len) to packet\n",
 			to->p_list.cstr_length));
@@ -10425,25 +10468,20 @@ ICryptKey* ClntAuthBlock::newKey(CheckStatusWrapper* status)
 
 void ClntAuthBlock::tryNewKeys(rem_port* port)
 {
-	for (unsigned k = cryptKeys.getCount(); k--; )
+	while (cryptKeys.hasData())
 	{
-		if (port->tryNewKey(cryptKeys[k]))
-		{
-			releaseKeys(k);
-			cryptKeys.clear();
-			return;
-		}
+		auto* key = cryptKeys.pop();
+		if (port->tryNewKey(key))
+			break;
 	}
 
-	cryptKeys.clear();
+	releaseKeys();
 }
 
-void ClntAuthBlock::releaseKeys(unsigned from)
+void ClntAuthBlock::releaseKeys()
 {
-	while (from < cryptKeys.getCount())
-	{
-		delete cryptKeys[from++];
-	}
+	while (cryptKeys.hasData())
+		delete cryptKeys.pop();
 }
 
 void ClntAuthBlock::createCryptCallback(ICryptKeyCallback** callback)

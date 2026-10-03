@@ -66,12 +66,38 @@ using namespace Firebird;
 namespace Jrd {
 
 
+// Check that the event parameter block is well formed before
+// changing the shared global region. Each item shall completely
+// fit into the buffer: one byte of the name length, the name
+// itself and four bytes of the prior count.
+static void validateEpb(USHORT eventsLength, const UCHAR* events)
+{
+	const UCHAR* p = events + 1;
+	const UCHAR* const end = events + eventsLength;
+
+	while (p < end)
+	{
+		if (end - p < 5 || p[0] > end - p - 5)
+			Arg::Gds(isc_bad_epb_form).raise();
+
+		p += 1 + p[0] + 4;
+	}
+}
+
+
 void EventManager::init(Attachment* attachment)
 {
 	Database* const dbb = attachment->att_database;
+	EventManager* const eventMgr = dbb->eventManager();
 
-	if (!attachment->att_event_session)
-		attachment->att_event_session = dbb->eventManager()->create_session();
+	SLONG expected = attachment->att_event_session;
+	if (expected)
+		return;
+
+	const SLONG session = eventMgr->create_session();
+
+	if (!attachment->att_event_session.compare_exchange_strong(expected, session))
+		eventMgr->deleteSession(session);	// another thread won the race
 }
 
 
@@ -211,6 +237,10 @@ SLONG EventManager::queEvents(SLONG session_id,
 	{
 		Arg::Gds(isc_bad_epb_form).raise();
 	}
+
+	// Validate the EPB up front to avoid any changes of the shared global
+	// region in case of a malformed buffer
+	validateEpb(events_length, events);
 
 	acquire_shmem();
 
@@ -534,8 +564,10 @@ frb* EventManager::alloc_global(UCHAR type, ULONG length, bool recurse)
 #ifdef HAVE_OBJECT_MAP
 	if (!best && !recurse)
 	{
+		fb_assert(length <= m_sharedMemory->sh_mem_increment);
+
 		const ULONG old_length = m_sharedMemory->sh_mem_length_mapped;
-		const ULONG ev_length = old_length + m_config->getEventMemSize();
+		const ULONG ev_length = old_length + m_sharedMemory->sh_mem_increment;
 
 		LocalStatus ls;
 		CheckStatusWrapper localStatus(&ls);

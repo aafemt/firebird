@@ -100,6 +100,8 @@ namespace Firebird
 	class IExternalContext;
 	class IExternalResultSet;
 	class IExternalFunction;
+	class IExternalAggregateInstance;
+	class IExternalAggregateFunction;
 	class IExternalProcedure;
 	class IExternalTrigger;
 	class IRoutineMetadata;
@@ -130,6 +132,7 @@ namespace Firebird
 	class ITracePlugin;
 	class ITraceFactory;
 	class IUdrFunctionFactory;
+	class IUdrAggregateFactory;
 	class IUdrProcedureFactory;
 	class IUdrTriggerFactory;
 	class IUdrPlugin;
@@ -4433,6 +4436,101 @@ namespace Firebird
 		}
 	};
 
+#define FIREBIRD_IEXTERNAL_AGGREGATE_INSTANCE_VERSION 3u
+
+	class IExternalAggregateInstance : public IDisposable
+	{
+	public:
+		struct VTable : public IDisposable::VTable
+		{
+			void (CLOOP_CARG *start)(IExternalAggregateInstance* self, IStatus* status, IExternalContext* context) CLOOP_NOEXCEPT;
+			void (CLOOP_CARG *accumulate)(IExternalAggregateInstance* self, IStatus* status, IExternalContext* context, void* inMsg) CLOOP_NOEXCEPT;
+			void (CLOOP_CARG *group)(IExternalAggregateInstance* self, IStatus* status, IExternalContext* context, void* outMsg) CLOOP_NOEXCEPT;
+			void (CLOOP_CARG *finish)(IExternalAggregateInstance* self, IStatus* status, IExternalContext* context) CLOOP_NOEXCEPT;
+		};
+
+	protected:
+		IExternalAggregateInstance(DoNotInherit)
+			: IDisposable(DoNotInherit())
+		{
+		}
+
+		~IExternalAggregateInstance()
+		{
+		}
+
+	public:
+		static CLOOP_CONSTEXPR unsigned VERSION = FIREBIRD_IEXTERNAL_AGGREGATE_INSTANCE_VERSION;
+
+		template <typename StatusType> void start(StatusType* status, IExternalContext* context)
+		{
+			StatusType::clearException(status);
+			static_cast<VTable*>(this->cloopVTable)->start(this, status, context);
+			StatusType::checkException(status);
+		}
+
+		template <typename StatusType> void accumulate(StatusType* status, IExternalContext* context, void* inMsg)
+		{
+			StatusType::clearException(status);
+			static_cast<VTable*>(this->cloopVTable)->accumulate(this, status, context, inMsg);
+			StatusType::checkException(status);
+		}
+
+		template <typename StatusType> void group(StatusType* status, IExternalContext* context, void* outMsg)
+		{
+			StatusType::clearException(status);
+			static_cast<VTable*>(this->cloopVTable)->group(this, status, context, outMsg);
+			StatusType::checkException(status);
+		}
+
+		template <typename StatusType> void finish(StatusType* status, IExternalContext* context)
+		{
+			StatusType::clearException(status);
+			static_cast<VTable*>(this->cloopVTable)->finish(this, status, context);
+			StatusType::checkException(status);
+		}
+	};
+
+#define FIREBIRD_IEXTERNAL_AGGREGATE_FUNCTION_VERSION 3u
+
+	class IExternalAggregateFunction : public IDisposable
+	{
+	public:
+		struct VTable : public IDisposable::VTable
+		{
+			void (CLOOP_CARG *getCharSet)(IExternalAggregateFunction* self, IStatus* status, IExternalContext* context, char* name, unsigned nameSize) CLOOP_NOEXCEPT;
+			IExternalAggregateInstance* (CLOOP_CARG *newInstance)(IExternalAggregateFunction* self, IStatus* status, IExternalContext* context) CLOOP_NOEXCEPT;
+		};
+
+	protected:
+		IExternalAggregateFunction(DoNotInherit)
+			: IDisposable(DoNotInherit())
+		{
+		}
+
+		~IExternalAggregateFunction()
+		{
+		}
+
+	public:
+		static CLOOP_CONSTEXPR unsigned VERSION = FIREBIRD_IEXTERNAL_AGGREGATE_FUNCTION_VERSION;
+
+		template <typename StatusType> void getCharSet(StatusType* status, IExternalContext* context, char* name, unsigned nameSize)
+		{
+			StatusType::clearException(status);
+			static_cast<VTable*>(this->cloopVTable)->getCharSet(this, status, context, name, nameSize);
+			StatusType::checkException(status);
+		}
+
+		template <typename StatusType> IExternalAggregateInstance* newInstance(StatusType* status, IExternalContext* context)
+		{
+			StatusType::clearException(status);
+			IExternalAggregateInstance* ret = static_cast<VTable*>(this->cloopVTable)->newInstance(this, status, context);
+			StatusType::checkException(status);
+			return ret;
+		}
+	};
+
 #define FIREBIRD_IEXTERNAL_PROCEDURE_VERSION 3u
 
 	class IExternalProcedure : public IDisposable
@@ -4644,7 +4742,7 @@ namespace Firebird
 		}
 	};
 
-#define FIREBIRD_IEXTERNAL_ENGINE_VERSION 4u
+#define FIREBIRD_IEXTERNAL_ENGINE_VERSION 5u
 
 	class IExternalEngine : public IPluginBase
 	{
@@ -4657,6 +4755,7 @@ namespace Firebird
 			IExternalFunction* (CLOOP_CARG *makeFunction)(IExternalEngine* self, IStatus* status, IExternalContext* context, IRoutineMetadata* metadata, IMetadataBuilder* inBuilder, IMetadataBuilder* outBuilder) CLOOP_NOEXCEPT;
 			IExternalProcedure* (CLOOP_CARG *makeProcedure)(IExternalEngine* self, IStatus* status, IExternalContext* context, IRoutineMetadata* metadata, IMetadataBuilder* inBuilder, IMetadataBuilder* outBuilder) CLOOP_NOEXCEPT;
 			IExternalTrigger* (CLOOP_CARG *makeTrigger)(IExternalEngine* self, IStatus* status, IExternalContext* context, IRoutineMetadata* metadata, IMetadataBuilder* fieldsBuilder) CLOOP_NOEXCEPT;
+			IExternalAggregateFunction* (CLOOP_CARG *makeAggregateFunction)(IExternalEngine* self, IStatus* status, IExternalContext* context, IRoutineMetadata* metadata, IMetadataBuilder* inBuilder, IMetadataBuilder* outBuilder) CLOOP_NOEXCEPT;
 		};
 
 	protected:
@@ -4713,6 +4812,20 @@ namespace Firebird
 		{
 			StatusType::clearException(status);
 			IExternalTrigger* ret = static_cast<VTable*>(this->cloopVTable)->makeTrigger(this, status, context, metadata, fieldsBuilder);
+			StatusType::checkException(status);
+			return ret;
+		}
+
+		template <typename StatusType> IExternalAggregateFunction* makeAggregateFunction(StatusType* status, IExternalContext* context, IRoutineMetadata* metadata, IMetadataBuilder* inBuilder, IMetadataBuilder* outBuilder)
+		{
+			if (cloopVTable->version < 5)
+			{
+				StatusType::setVersionError(status, "IExternalEngine", cloopVTable->version, 5);
+				StatusType::checkException(status);
+				return 0;
+			}
+			StatusType::clearException(status);
+			IExternalAggregateFunction* ret = static_cast<VTable*>(this->cloopVTable)->makeAggregateFunction(this, status, context, metadata, inBuilder, outBuilder);
 			StatusType::checkException(status);
 			return ret;
 		}
@@ -4846,8 +4959,8 @@ namespace Firebird
 			IInt128* (CLOOP_CARG *getInt128)(IUtil* self, IStatus* status) CLOOP_NOEXCEPT;
 			void (CLOOP_CARG *decodeTimeTzEx)(IUtil* self, IStatus* status, const ISC_TIME_TZ_EX* timeTz, unsigned* hours, unsigned* minutes, unsigned* seconds, unsigned* fractions, unsigned timeZoneBufferLength, char* timeZoneBuffer) CLOOP_NOEXCEPT;
 			void (CLOOP_CARG *decodeTimeStampTzEx)(IUtil* self, IStatus* status, const ISC_TIMESTAMP_TZ_EX* timeStampTz, unsigned* year, unsigned* month, unsigned* day, unsigned* hours, unsigned* minutes, unsigned* seconds, unsigned* fractions, unsigned timeZoneBufferLength, char* timeZoneBuffer) CLOOP_NOEXCEPT;
-			IAttachment* (CLOOP_CARG *executeCreateDatabase2)(IUtil* self, IStatus* status, unsigned stmtLength, const char* creatDBstatement, unsigned dialect, unsigned dpbLength, const unsigned char* dpb, FB_BOOLEAN* stmtIsCreateDb) CLOOP_NOEXCEPT;
 			void (CLOOP_CARG *convert)(IUtil* self, IStatus* status, unsigned sourceType, unsigned sourceScale, unsigned sourceLength, const void* source, unsigned targetType, unsigned targetScale, unsigned targetLength, void* target) CLOOP_NOEXCEPT;
+			IAttachment* (CLOOP_CARG *executeCreateDatabase2)(IUtil* self, IStatus* status, unsigned stmtLength, const char* creatDBstatement, unsigned dialect, unsigned dpbLength, const unsigned char* dpb, FB_BOOLEAN* stmtIsCreateDb) CLOOP_NOEXCEPT;
 		};
 
 	protected:
@@ -5069,11 +5182,24 @@ namespace Firebird
 			StatusType::checkException(status);
 		}
 
-		template <typename StatusType> IAttachment* executeCreateDatabase2(StatusType* status, unsigned stmtLength, const char* creatDBstatement, unsigned dialect, unsigned dpbLength, const unsigned char* dpb, FB_BOOLEAN* stmtIsCreateDb)
+		template <typename StatusType> void convert(StatusType* status, unsigned sourceType, unsigned sourceScale, unsigned sourceLength, const void* source, unsigned targetType, unsigned targetScale, unsigned targetLength, void* target)
 		{
 			if (cloopVTable->version < 5)
 			{
 				StatusType::setVersionError(status, "IUtil", cloopVTable->version, 5);
+				StatusType::checkException(status);
+				return;
+			}
+			StatusType::clearException(status);
+			static_cast<VTable*>(this->cloopVTable)->convert(this, status, sourceType, sourceScale, sourceLength, source, targetType, targetScale, targetLength, target);
+			StatusType::checkException(status);
+		}
+
+		template <typename StatusType> IAttachment* executeCreateDatabase2(StatusType* status, unsigned stmtLength, const char* creatDBstatement, unsigned dialect, unsigned dpbLength, const unsigned char* dpb, FB_BOOLEAN* stmtIsCreateDb)
+		{
+			if (cloopVTable->version < 6)
+			{
+				StatusType::setVersionError(status, "IUtil", cloopVTable->version, 6);
 				StatusType::checkException(status);
 				return 0;
 			}
@@ -5081,19 +5207,6 @@ namespace Firebird
 			IAttachment* ret = static_cast<VTable*>(this->cloopVTable)->executeCreateDatabase2(this, status, stmtLength, creatDBstatement, dialect, dpbLength, dpb, stmtIsCreateDb);
 			StatusType::checkException(status);
 			return ret;
-		}
-
-		template <typename StatusType> void convert(StatusType* status, unsigned sourceType, unsigned sourceScale, unsigned sourceLength, const void* source, unsigned targetType, unsigned targetScale, unsigned targetLength, void* target)
-		{
-			if (cloopVTable->version < 6)
-			{
-				StatusType::setVersionError(status, "IUtil", cloopVTable->version, 6);
-				StatusType::checkException(status);
-				return;
-			}
-			StatusType::clearException(status);
-			static_cast<VTable*>(this->cloopVTable)->convert(this, status, sourceType, sourceScale, sourceLength, source, targetType, targetScale, targetLength, target);
-			StatusType::checkException(status);
 		}
 	};
 
@@ -5609,7 +5722,7 @@ namespace Firebird
 		}
 	};
 
-#define FIREBIRD_ITRACE_STATEMENT_VERSION 3u
+#define FIREBIRD_ITRACE_STATEMENT_VERSION 2u
 
 	class ITraceStatement : public IVersioned
 	{
@@ -5618,7 +5731,6 @@ namespace Firebird
 		{
 			ISC_INT64 (CLOOP_CARG *getStmtID)(ITraceStatement* self) CLOOP_NOEXCEPT;
 			PerformanceInfo* (CLOOP_CARG *getPerf)(ITraceStatement* self) CLOOP_NOEXCEPT;
-			IPerformanceStats* (CLOOP_CARG *getPerfStats)(ITraceStatement* self) CLOOP_NOEXCEPT;
 		};
 
 	protected:
@@ -5645,16 +5757,6 @@ namespace Firebird
 			PerformanceInfo* ret = static_cast<VTable*>(this->cloopVTable)->getPerf(this);
 			return ret;
 		}
-
-		IPerformanceStats* getPerfStats()
-		{
-			if (cloopVTable->version < 3)
-			{
-				return 0;
-			}
-			IPerformanceStats* ret = static_cast<VTable*>(this->cloopVTable)->getPerfStats(this);
-			return ret;
-		}
 	};
 
 #define FIREBIRD_ITRACE_SQLSTATEMENT_VERSION 4u
@@ -5669,6 +5771,7 @@ namespace Firebird
 			ITraceParams* (CLOOP_CARG *getInputs)(ITraceSQLStatement* self) CLOOP_NOEXCEPT;
 			const char* (CLOOP_CARG *getTextUTF8)(ITraceSQLStatement* self) CLOOP_NOEXCEPT;
 			const char* (CLOOP_CARG *getExplainedPlan)(ITraceSQLStatement* self) CLOOP_NOEXCEPT;
+			IPerformanceStats* (CLOOP_CARG *getPerfStats)(ITraceSQLStatement* self) CLOOP_NOEXCEPT;
 		};
 
 	protected:
@@ -5713,6 +5816,16 @@ namespace Firebird
 			const char* ret = static_cast<VTable*>(this->cloopVTable)->getExplainedPlan(this);
 			return ret;
 		}
+
+		IPerformanceStats* getPerfStats()
+		{
+			if (cloopVTable->version < 4)
+			{
+				return 0;
+			}
+			IPerformanceStats* ret = static_cast<VTable*>(this->cloopVTable)->getPerfStats(this);
+			return ret;
+		}
 	};
 
 #define FIREBIRD_ITRACE_BLRSTATEMENT_VERSION 4u
@@ -5725,6 +5838,7 @@ namespace Firebird
 			const unsigned char* (CLOOP_CARG *getData)(ITraceBLRStatement* self) CLOOP_NOEXCEPT;
 			unsigned (CLOOP_CARG *getDataLength)(ITraceBLRStatement* self) CLOOP_NOEXCEPT;
 			const char* (CLOOP_CARG *getText)(ITraceBLRStatement* self) CLOOP_NOEXCEPT;
+			IPerformanceStats* (CLOOP_CARG *getPerfStats)(ITraceBLRStatement* self) CLOOP_NOEXCEPT;
 		};
 
 	protected:
@@ -5755,6 +5869,16 @@ namespace Firebird
 		const char* getText()
 		{
 			const char* ret = static_cast<VTable*>(this->cloopVTable)->getText(this);
+			return ret;
+		}
+
+		IPerformanceStats* getPerfStats()
+		{
+			if (cloopVTable->version < 4)
+			{
+				return 0;
+			}
+			IPerformanceStats* ret = static_cast<VTable*>(this->cloopVTable)->getPerfStats(this);
 			return ret;
 		}
 	};
@@ -6359,6 +6483,7 @@ namespace Firebird
 			const char* (CLOOP_CARG *getDatabaseName)(ITraceInitInfo* self) CLOOP_NOEXCEPT;
 			ITraceDatabaseConnection* (CLOOP_CARG *getConnection)(ITraceInitInfo* self) CLOOP_NOEXCEPT;
 			ITraceLogWriter* (CLOOP_CARG *getLogWriter)(ITraceInitInfo* self) CLOOP_NOEXCEPT;
+			unsigned (CLOOP_CARG *getTraceSessionFlags)(ITraceInitInfo* self) CLOOP_NOEXCEPT;
 		};
 
 	protected:
@@ -6373,6 +6498,12 @@ namespace Firebird
 
 	public:
 		static CLOOP_CONSTEXPR unsigned VERSION = FIREBIRD_ITRACE_INIT_INFO_VERSION;
+
+		static CLOOP_CONSTEXPR unsigned SESSION_FLAG_ADMIN = 0x1;
+		static CLOOP_CONSTEXPR unsigned SESSION_FLAG_ACTIVE = 0x2;
+		static CLOOP_CONSTEXPR unsigned SESSION_FLAG_SYSTEM = 0x4;
+		static CLOOP_CONSTEXPR unsigned SESSION_FLAG_LOG_FULL = 0x8;
+		static CLOOP_CONSTEXPR unsigned SESSION_FLAG_LOCAL = 0x10;
 
 		const char* getConfigText()
 		{
@@ -6413,6 +6544,12 @@ namespace Firebird
 		ITraceLogWriter* getLogWriter()
 		{
 			ITraceLogWriter* ret = static_cast<VTable*>(this->cloopVTable)->getLogWriter(this);
+			return ret;
+		}
+
+		unsigned getTraceSessionFlags()
+		{
+			unsigned ret = static_cast<VTable*>(this->cloopVTable)->getTraceSessionFlags(this);
 			return ret;
 		}
 	};
@@ -6743,6 +6880,46 @@ namespace Firebird
 		}
 	};
 
+#define FIREBIRD_IUDR_AGGREGATE_FACTORY_VERSION 3u
+
+	class IUdrAggregateFactory : public IDisposable
+	{
+	public:
+		struct VTable : public IDisposable::VTable
+		{
+			void (CLOOP_CARG *setup)(IUdrAggregateFactory* self, IStatus* status, IExternalContext* context, IRoutineMetadata* metadata, IMetadataBuilder* inBuilder, IMetadataBuilder* outBuilder) CLOOP_NOEXCEPT;
+			IExternalAggregateFunction* (CLOOP_CARG *newItem)(IUdrAggregateFactory* self, IStatus* status, IExternalContext* context, IRoutineMetadata* metadata) CLOOP_NOEXCEPT;
+		};
+
+	protected:
+		IUdrAggregateFactory(DoNotInherit)
+			: IDisposable(DoNotInherit())
+		{
+		}
+
+		~IUdrAggregateFactory()
+		{
+		}
+
+	public:
+		static CLOOP_CONSTEXPR unsigned VERSION = FIREBIRD_IUDR_AGGREGATE_FACTORY_VERSION;
+
+		template <typename StatusType> void setup(StatusType* status, IExternalContext* context, IRoutineMetadata* metadata, IMetadataBuilder* inBuilder, IMetadataBuilder* outBuilder)
+		{
+			StatusType::clearException(status);
+			static_cast<VTable*>(this->cloopVTable)->setup(this, status, context, metadata, inBuilder, outBuilder);
+			StatusType::checkException(status);
+		}
+
+		template <typename StatusType> IExternalAggregateFunction* newItem(StatusType* status, IExternalContext* context, IRoutineMetadata* metadata)
+		{
+			StatusType::clearException(status);
+			IExternalAggregateFunction* ret = static_cast<VTable*>(this->cloopVTable)->newItem(this, status, context, metadata);
+			StatusType::checkException(status);
+			return ret;
+		}
+	};
+
 #define FIREBIRD_IUDR_PROCEDURE_FACTORY_VERSION 3u
 
 	class IUdrProcedureFactory : public IDisposable
@@ -6823,7 +7000,7 @@ namespace Firebird
 		}
 	};
 
-#define FIREBIRD_IUDR_PLUGIN_VERSION 2u
+#define FIREBIRD_IUDR_PLUGIN_VERSION 3u
 
 	class IUdrPlugin : public IVersioned
 	{
@@ -6834,6 +7011,7 @@ namespace Firebird
 			void (CLOOP_CARG *registerFunction)(IUdrPlugin* self, IStatus* status, const char* name, IUdrFunctionFactory* factory) CLOOP_NOEXCEPT;
 			void (CLOOP_CARG *registerProcedure)(IUdrPlugin* self, IStatus* status, const char* name, IUdrProcedureFactory* factory) CLOOP_NOEXCEPT;
 			void (CLOOP_CARG *registerTrigger)(IUdrPlugin* self, IStatus* status, const char* name, IUdrTriggerFactory* factory) CLOOP_NOEXCEPT;
+			void (CLOOP_CARG *registerAggregateFunction)(IUdrPlugin* self, IStatus* status, const char* name, IUdrAggregateFactory* factory) CLOOP_NOEXCEPT;
 		};
 
 	protected:
@@ -6873,6 +7051,19 @@ namespace Firebird
 		{
 			StatusType::clearException(status);
 			static_cast<VTable*>(this->cloopVTable)->registerTrigger(this, status, name, factory);
+			StatusType::checkException(status);
+		}
+
+		template <typename StatusType> void registerAggregateFunction(StatusType* status, const char* name, IUdrAggregateFactory* factory)
+		{
+			if (cloopVTable->version < 3)
+			{
+				StatusType::setVersionError(status, "IUdrPlugin", cloopVTable->version, 3);
+				StatusType::checkException(status);
+				return;
+			}
+			StatusType::clearException(status);
+			static_cast<VTable*>(this->cloopVTable)->registerAggregateFunction(this, status, name, factory);
 			StatusType::checkException(status);
 		}
 	};
@@ -15854,6 +16045,199 @@ namespace Firebird
 	};
 
 	template <typename Name, typename StatusType, typename Base>
+	class IExternalAggregateInstanceBaseImpl : public Base
+	{
+	public:
+		typedef IExternalAggregateInstance Declaration;
+
+		IExternalAggregateInstanceBaseImpl(DoNotInherit = DoNotInherit())
+		{
+			static struct VTableImpl : Base::VTable
+			{
+				VTableImpl()
+				{
+					this->version = Base::VERSION;
+					this->dispose = &Name::cloopdisposeDispatcher;
+					this->start = &Name::cloopstartDispatcher;
+					this->accumulate = &Name::cloopaccumulateDispatcher;
+					this->group = &Name::cloopgroupDispatcher;
+					this->finish = &Name::cloopfinishDispatcher;
+				}
+			} vTable;
+
+			this->cloopVTable = &vTable;
+		}
+
+		static void CLOOP_CARG cloopstartDispatcher(IExternalAggregateInstance* self, IStatus* status, IExternalContext* context) CLOOP_NOEXCEPT
+		{
+			StatusType status2(status);
+
+			try
+			{
+				static_cast<Name*>(self)->Name::start(&status2, context);
+			}
+			catch (...)
+			{
+				StatusType::catchException(&status2);
+			}
+		}
+
+		static void CLOOP_CARG cloopaccumulateDispatcher(IExternalAggregateInstance* self, IStatus* status, IExternalContext* context, void* inMsg) CLOOP_NOEXCEPT
+		{
+			StatusType status2(status);
+
+			try
+			{
+				static_cast<Name*>(self)->Name::accumulate(&status2, context, inMsg);
+			}
+			catch (...)
+			{
+				StatusType::catchException(&status2);
+			}
+		}
+
+		static void CLOOP_CARG cloopgroupDispatcher(IExternalAggregateInstance* self, IStatus* status, IExternalContext* context, void* outMsg) CLOOP_NOEXCEPT
+		{
+			StatusType status2(status);
+
+			try
+			{
+				static_cast<Name*>(self)->Name::group(&status2, context, outMsg);
+			}
+			catch (...)
+			{
+				StatusType::catchException(&status2);
+			}
+		}
+
+		static void CLOOP_CARG cloopfinishDispatcher(IExternalAggregateInstance* self, IStatus* status, IExternalContext* context) CLOOP_NOEXCEPT
+		{
+			StatusType status2(status);
+
+			try
+			{
+				static_cast<Name*>(self)->Name::finish(&status2, context);
+			}
+			catch (...)
+			{
+				StatusType::catchException(&status2);
+			}
+		}
+
+		static void CLOOP_CARG cloopdisposeDispatcher(IDisposable* self) CLOOP_NOEXCEPT
+		{
+			try
+			{
+				static_cast<Name*>(self)->Name::dispose();
+			}
+			catch (...)
+			{
+				StatusType::catchException(0);
+			}
+		}
+	};
+
+	template <typename Name, typename StatusType, typename Base = IDisposableImpl<Name, StatusType, Inherit<IVersionedImpl<Name, StatusType, Inherit<IExternalAggregateInstance> > > > >
+	class IExternalAggregateInstanceImpl : public IExternalAggregateInstanceBaseImpl<Name, StatusType, Base>
+	{
+	protected:
+		IExternalAggregateInstanceImpl(DoNotInherit = DoNotInherit())
+		{
+		}
+
+	public:
+		virtual ~IExternalAggregateInstanceImpl()
+		{
+		}
+
+		virtual void start(StatusType* status, IExternalContext* context) = 0;
+		virtual void accumulate(StatusType* status, IExternalContext* context, void* inMsg) = 0;
+		virtual void group(StatusType* status, IExternalContext* context, void* outMsg) = 0;
+		virtual void finish(StatusType* status, IExternalContext* context) = 0;
+	};
+
+	template <typename Name, typename StatusType, typename Base>
+	class IExternalAggregateFunctionBaseImpl : public Base
+	{
+	public:
+		typedef IExternalAggregateFunction Declaration;
+
+		IExternalAggregateFunctionBaseImpl(DoNotInherit = DoNotInherit())
+		{
+			static struct VTableImpl : Base::VTable
+			{
+				VTableImpl()
+				{
+					this->version = Base::VERSION;
+					this->dispose = &Name::cloopdisposeDispatcher;
+					this->getCharSet = &Name::cloopgetCharSetDispatcher;
+					this->newInstance = &Name::cloopnewInstanceDispatcher;
+				}
+			} vTable;
+
+			this->cloopVTable = &vTable;
+		}
+
+		static void CLOOP_CARG cloopgetCharSetDispatcher(IExternalAggregateFunction* self, IStatus* status, IExternalContext* context, char* name, unsigned nameSize) CLOOP_NOEXCEPT
+		{
+			StatusType status2(status);
+
+			try
+			{
+				static_cast<Name*>(self)->Name::getCharSet(&status2, context, name, nameSize);
+			}
+			catch (...)
+			{
+				StatusType::catchException(&status2);
+			}
+		}
+
+		static IExternalAggregateInstance* CLOOP_CARG cloopnewInstanceDispatcher(IExternalAggregateFunction* self, IStatus* status, IExternalContext* context) CLOOP_NOEXCEPT
+		{
+			StatusType status2(status);
+
+			try
+			{
+				return static_cast<Name*>(self)->Name::newInstance(&status2, context);
+			}
+			catch (...)
+			{
+				StatusType::catchException(&status2);
+				return static_cast<IExternalAggregateInstance*>(0);
+			}
+		}
+
+		static void CLOOP_CARG cloopdisposeDispatcher(IDisposable* self) CLOOP_NOEXCEPT
+		{
+			try
+			{
+				static_cast<Name*>(self)->Name::dispose();
+			}
+			catch (...)
+			{
+				StatusType::catchException(0);
+			}
+		}
+	};
+
+	template <typename Name, typename StatusType, typename Base = IDisposableImpl<Name, StatusType, Inherit<IVersionedImpl<Name, StatusType, Inherit<IExternalAggregateFunction> > > > >
+	class IExternalAggregateFunctionImpl : public IExternalAggregateFunctionBaseImpl<Name, StatusType, Base>
+	{
+	protected:
+		IExternalAggregateFunctionImpl(DoNotInherit = DoNotInherit())
+		{
+		}
+
+	public:
+		virtual ~IExternalAggregateFunctionImpl()
+		{
+		}
+
+		virtual void getCharSet(StatusType* status, IExternalContext* context, char* name, unsigned nameSize) = 0;
+		virtual IExternalAggregateInstance* newInstance(StatusType* status, IExternalContext* context) = 0;
+	};
+
+	template <typename Name, typename StatusType, typename Base>
 	class IExternalProcedureBaseImpl : public Base
 	{
 	public:
@@ -16242,6 +16626,7 @@ namespace Firebird
 					this->makeFunction = &Name::cloopmakeFunctionDispatcher;
 					this->makeProcedure = &Name::cloopmakeProcedureDispatcher;
 					this->makeTrigger = &Name::cloopmakeTriggerDispatcher;
+					this->makeAggregateFunction = &Name::cloopmakeAggregateFunctionDispatcher;
 				}
 			} vTable;
 
@@ -16335,6 +16720,21 @@ namespace Firebird
 			}
 		}
 
+		static IExternalAggregateFunction* CLOOP_CARG cloopmakeAggregateFunctionDispatcher(IExternalEngine* self, IStatus* status, IExternalContext* context, IRoutineMetadata* metadata, IMetadataBuilder* inBuilder, IMetadataBuilder* outBuilder) CLOOP_NOEXCEPT
+		{
+			StatusType status2(status);
+
+			try
+			{
+				return static_cast<Name*>(self)->Name::makeAggregateFunction(&status2, context, metadata, inBuilder, outBuilder);
+			}
+			catch (...)
+			{
+				StatusType::catchException(&status2);
+				return static_cast<IExternalAggregateFunction*>(0);
+			}
+		}
+
 		static void CLOOP_CARG cloopsetOwnerDispatcher(IPluginBase* self, IReferenceCounted* r) CLOOP_NOEXCEPT
 		{
 			try
@@ -16405,6 +16805,7 @@ namespace Firebird
 		virtual IExternalFunction* makeFunction(StatusType* status, IExternalContext* context, IRoutineMetadata* metadata, IMetadataBuilder* inBuilder, IMetadataBuilder* outBuilder) = 0;
 		virtual IExternalProcedure* makeProcedure(StatusType* status, IExternalContext* context, IRoutineMetadata* metadata, IMetadataBuilder* inBuilder, IMetadataBuilder* outBuilder) = 0;
 		virtual IExternalTrigger* makeTrigger(StatusType* status, IExternalContext* context, IRoutineMetadata* metadata, IMetadataBuilder* fieldsBuilder) = 0;
+		virtual IExternalAggregateFunction* makeAggregateFunction(StatusType* status, IExternalContext* context, IRoutineMetadata* metadata, IMetadataBuilder* inBuilder, IMetadataBuilder* outBuilder) = 0;
 	};
 
 	template <typename Name, typename StatusType, typename Base>
@@ -16636,8 +17037,8 @@ namespace Firebird
 					this->getInt128 = &Name::cloopgetInt128Dispatcher;
 					this->decodeTimeTzEx = &Name::cloopdecodeTimeTzExDispatcher;
 					this->decodeTimeStampTzEx = &Name::cloopdecodeTimeStampTzExDispatcher;
-					this->executeCreateDatabase2 = &Name::cloopexecuteCreateDatabase2Dispatcher;
 					this->convert = &Name::cloopconvertDispatcher;
+					this->executeCreateDatabase2 = &Name::cloopexecuteCreateDatabase2Dispatcher;
 				}
 			} vTable;
 
@@ -16950,6 +17351,20 @@ namespace Firebird
 			}
 		}
 
+		static void CLOOP_CARG cloopconvertDispatcher(IUtil* self, IStatus* status, unsigned sourceType, unsigned sourceScale, unsigned sourceLength, const void* source, unsigned targetType, unsigned targetScale, unsigned targetLength, void* target) CLOOP_NOEXCEPT
+		{
+			StatusType status2(status);
+
+			try
+			{
+				static_cast<Name*>(self)->Name::convert(&status2, sourceType, sourceScale, sourceLength, source, targetType, targetScale, targetLength, target);
+			}
+			catch (...)
+			{
+				StatusType::catchException(&status2);
+			}
+		}
+
 		static IAttachment* CLOOP_CARG cloopexecuteCreateDatabase2Dispatcher(IUtil* self, IStatus* status, unsigned stmtLength, const char* creatDBstatement, unsigned dialect, unsigned dpbLength, const unsigned char* dpb, FB_BOOLEAN* stmtIsCreateDb) CLOOP_NOEXCEPT
 		{
 			StatusType status2(status);
@@ -16962,20 +17377,6 @@ namespace Firebird
 			{
 				StatusType::catchException(&status2);
 				return static_cast<IAttachment*>(0);
-			}
-		}
-
-		static void CLOOP_CARG cloopconvertDispatcher(IUtil* self, IStatus* status, unsigned sourceType, unsigned sourceScale, unsigned sourceLength, const void* source, unsigned targetType, unsigned targetScale, unsigned targetLength, void* target) CLOOP_NOEXCEPT
-		{
-			StatusType status2(status);
-
-			try
-			{
-				static_cast<Name*>(self)->Name::convert(&status2, sourceType, sourceScale, sourceLength, source, targetType, targetScale, targetLength, target);
-			}
-			catch (...)
-			{
-				StatusType::catchException(&status2);
 			}
 		}
 	};
@@ -17015,8 +17416,8 @@ namespace Firebird
 		virtual IInt128* getInt128(StatusType* status) = 0;
 		virtual void decodeTimeTzEx(StatusType* status, const ISC_TIME_TZ_EX* timeTz, unsigned* hours, unsigned* minutes, unsigned* seconds, unsigned* fractions, unsigned timeZoneBufferLength, char* timeZoneBuffer) = 0;
 		virtual void decodeTimeStampTzEx(StatusType* status, const ISC_TIMESTAMP_TZ_EX* timeStampTz, unsigned* year, unsigned* month, unsigned* day, unsigned* hours, unsigned* minutes, unsigned* seconds, unsigned* fractions, unsigned timeZoneBufferLength, char* timeZoneBuffer) = 0;
-		virtual IAttachment* executeCreateDatabase2(StatusType* status, unsigned stmtLength, const char* creatDBstatement, unsigned dialect, unsigned dpbLength, const unsigned char* dpb, FB_BOOLEAN* stmtIsCreateDb) = 0;
 		virtual void convert(StatusType* status, unsigned sourceType, unsigned sourceScale, unsigned sourceLength, const void* source, unsigned targetType, unsigned targetScale, unsigned targetLength, void* target) = 0;
+		virtual IAttachment* executeCreateDatabase2(StatusType* status, unsigned stmtLength, const char* creatDBstatement, unsigned dialect, unsigned dpbLength, const unsigned char* dpb, FB_BOOLEAN* stmtIsCreateDb) = 0;
 	};
 
 	template <typename Name, typename StatusType, typename Base>
@@ -18062,7 +18463,6 @@ namespace Firebird
 					this->version = Base::VERSION;
 					this->getStmtID = &Name::cloopgetStmtIDDispatcher;
 					this->getPerf = &Name::cloopgetPerfDispatcher;
-					this->getPerfStats = &Name::cloopgetPerfStatsDispatcher;
 				}
 			} vTable;
 
@@ -18094,19 +18494,6 @@ namespace Firebird
 				return static_cast<PerformanceInfo*>(0);
 			}
 		}
-
-		static IPerformanceStats* CLOOP_CARG cloopgetPerfStatsDispatcher(ITraceStatement* self) CLOOP_NOEXCEPT
-		{
-			try
-			{
-				return static_cast<Name*>(self)->Name::getPerfStats();
-			}
-			catch (...)
-			{
-				StatusType::catchException(0);
-				return static_cast<IPerformanceStats*>(0);
-			}
-		}
 	};
 
 	template <typename Name, typename StatusType, typename Base = IVersionedImpl<Name, StatusType, Inherit<ITraceStatement> > >
@@ -18124,7 +18511,6 @@ namespace Firebird
 
 		virtual ISC_INT64 getStmtID() = 0;
 		virtual PerformanceInfo* getPerf() = 0;
-		virtual IPerformanceStats* getPerfStats() = 0;
 	};
 
 	template <typename Name, typename StatusType, typename Base>
@@ -18142,12 +18528,12 @@ namespace Firebird
 					this->version = Base::VERSION;
 					this->getStmtID = &Name::cloopgetStmtIDDispatcher;
 					this->getPerf = &Name::cloopgetPerfDispatcher;
-					this->getPerfStats = &Name::cloopgetPerfStatsDispatcher;
 					this->getText = &Name::cloopgetTextDispatcher;
 					this->getPlan = &Name::cloopgetPlanDispatcher;
 					this->getInputs = &Name::cloopgetInputsDispatcher;
 					this->getTextUTF8 = &Name::cloopgetTextUTF8Dispatcher;
 					this->getExplainedPlan = &Name::cloopgetExplainedPlanDispatcher;
+					this->getPerfStats = &Name::cloopgetPerfStatsDispatcher;
 				}
 			} vTable;
 
@@ -18219,6 +18605,19 @@ namespace Firebird
 			}
 		}
 
+		static IPerformanceStats* CLOOP_CARG cloopgetPerfStatsDispatcher(ITraceSQLStatement* self) CLOOP_NOEXCEPT
+		{
+			try
+			{
+				return static_cast<Name*>(self)->Name::getPerfStats();
+			}
+			catch (...)
+			{
+				StatusType::catchException(0);
+				return static_cast<IPerformanceStats*>(0);
+			}
+		}
+
 		static ISC_INT64 CLOOP_CARG cloopgetStmtIDDispatcher(ITraceStatement* self) CLOOP_NOEXCEPT
 		{
 			try
@@ -18244,19 +18643,6 @@ namespace Firebird
 				return static_cast<PerformanceInfo*>(0);
 			}
 		}
-
-		static IPerformanceStats* CLOOP_CARG cloopgetPerfStatsDispatcher(ITraceStatement* self) CLOOP_NOEXCEPT
-		{
-			try
-			{
-				return static_cast<Name*>(self)->Name::getPerfStats();
-			}
-			catch (...)
-			{
-				StatusType::catchException(0);
-				return static_cast<IPerformanceStats*>(0);
-			}
-		}
 	};
 
 	template <typename Name, typename StatusType, typename Base = ITraceStatementImpl<Name, StatusType, Inherit<IVersionedImpl<Name, StatusType, Inherit<ITraceSQLStatement> > > > >
@@ -18277,6 +18663,7 @@ namespace Firebird
 		virtual ITraceParams* getInputs() = 0;
 		virtual const char* getTextUTF8() = 0;
 		virtual const char* getExplainedPlan() = 0;
+		virtual IPerformanceStats* getPerfStats() = 0;
 	};
 
 	template <typename Name, typename StatusType, typename Base>
@@ -18294,10 +18681,10 @@ namespace Firebird
 					this->version = Base::VERSION;
 					this->getStmtID = &Name::cloopgetStmtIDDispatcher;
 					this->getPerf = &Name::cloopgetPerfDispatcher;
-					this->getPerfStats = &Name::cloopgetPerfStatsDispatcher;
 					this->getData = &Name::cloopgetDataDispatcher;
 					this->getDataLength = &Name::cloopgetDataLengthDispatcher;
 					this->getText = &Name::cloopgetTextDispatcher;
+					this->getPerfStats = &Name::cloopgetPerfStatsDispatcher;
 				}
 			} vTable;
 
@@ -18343,6 +18730,19 @@ namespace Firebird
 			}
 		}
 
+		static IPerformanceStats* CLOOP_CARG cloopgetPerfStatsDispatcher(ITraceBLRStatement* self) CLOOP_NOEXCEPT
+		{
+			try
+			{
+				return static_cast<Name*>(self)->Name::getPerfStats();
+			}
+			catch (...)
+			{
+				StatusType::catchException(0);
+				return static_cast<IPerformanceStats*>(0);
+			}
+		}
+
 		static ISC_INT64 CLOOP_CARG cloopgetStmtIDDispatcher(ITraceStatement* self) CLOOP_NOEXCEPT
 		{
 			try
@@ -18368,19 +18768,6 @@ namespace Firebird
 				return static_cast<PerformanceInfo*>(0);
 			}
 		}
-
-		static IPerformanceStats* CLOOP_CARG cloopgetPerfStatsDispatcher(ITraceStatement* self) CLOOP_NOEXCEPT
-		{
-			try
-			{
-				return static_cast<Name*>(self)->Name::getPerfStats();
-			}
-			catch (...)
-			{
-				StatusType::catchException(0);
-				return static_cast<IPerformanceStats*>(0);
-			}
-		}
 	};
 
 	template <typename Name, typename StatusType, typename Base = ITraceStatementImpl<Name, StatusType, Inherit<IVersionedImpl<Name, StatusType, Inherit<ITraceBLRStatement> > > > >
@@ -18399,6 +18786,7 @@ namespace Firebird
 		virtual const unsigned char* getData() = 0;
 		virtual unsigned getDataLength() = 0;
 		virtual const char* getText() = 0;
+		virtual IPerformanceStats* getPerfStats() = 0;
 	};
 
 	template <typename Name, typename StatusType, typename Base>
@@ -19566,6 +19954,7 @@ namespace Firebird
 					this->getDatabaseName = &Name::cloopgetDatabaseNameDispatcher;
 					this->getConnection = &Name::cloopgetConnectionDispatcher;
 					this->getLogWriter = &Name::cloopgetLogWriterDispatcher;
+					this->getTraceSessionFlags = &Name::cloopgetTraceSessionFlagsDispatcher;
 				}
 			} vTable;
 
@@ -19662,6 +20051,19 @@ namespace Firebird
 				return static_cast<ITraceLogWriter*>(0);
 			}
 		}
+
+		static unsigned CLOOP_CARG cloopgetTraceSessionFlagsDispatcher(ITraceInitInfo* self) CLOOP_NOEXCEPT
+		{
+			try
+			{
+				return static_cast<Name*>(self)->Name::getTraceSessionFlags();
+			}
+			catch (...)
+			{
+				StatusType::catchException(0);
+				return static_cast<unsigned>(0);
+			}
+		}
 	};
 
 	template <typename Name, typename StatusType, typename Base = IVersionedImpl<Name, StatusType, Inherit<ITraceInitInfo> > >
@@ -19684,6 +20086,7 @@ namespace Firebird
 		virtual const char* getDatabaseName() = 0;
 		virtual ITraceDatabaseConnection* getConnection() = 0;
 		virtual ITraceLogWriter* getLogWriter() = 0;
+		virtual unsigned getTraceSessionFlags() = 0;
 	};
 
 	template <typename Name, typename StatusType, typename Base>
@@ -20326,6 +20729,87 @@ namespace Firebird
 	};
 
 	template <typename Name, typename StatusType, typename Base>
+	class IUdrAggregateFactoryBaseImpl : public Base
+	{
+	public:
+		typedef IUdrAggregateFactory Declaration;
+
+		IUdrAggregateFactoryBaseImpl(DoNotInherit = DoNotInherit())
+		{
+			static struct VTableImpl : Base::VTable
+			{
+				VTableImpl()
+				{
+					this->version = Base::VERSION;
+					this->dispose = &Name::cloopdisposeDispatcher;
+					this->setup = &Name::cloopsetupDispatcher;
+					this->newItem = &Name::cloopnewItemDispatcher;
+				}
+			} vTable;
+
+			this->cloopVTable = &vTable;
+		}
+
+		static void CLOOP_CARG cloopsetupDispatcher(IUdrAggregateFactory* self, IStatus* status, IExternalContext* context, IRoutineMetadata* metadata, IMetadataBuilder* inBuilder, IMetadataBuilder* outBuilder) CLOOP_NOEXCEPT
+		{
+			StatusType status2(status);
+
+			try
+			{
+				static_cast<Name*>(self)->Name::setup(&status2, context, metadata, inBuilder, outBuilder);
+			}
+			catch (...)
+			{
+				StatusType::catchException(&status2);
+			}
+		}
+
+		static IExternalAggregateFunction* CLOOP_CARG cloopnewItemDispatcher(IUdrAggregateFactory* self, IStatus* status, IExternalContext* context, IRoutineMetadata* metadata) CLOOP_NOEXCEPT
+		{
+			StatusType status2(status);
+
+			try
+			{
+				return static_cast<Name*>(self)->Name::newItem(&status2, context, metadata);
+			}
+			catch (...)
+			{
+				StatusType::catchException(&status2);
+				return static_cast<IExternalAggregateFunction*>(0);
+			}
+		}
+
+		static void CLOOP_CARG cloopdisposeDispatcher(IDisposable* self) CLOOP_NOEXCEPT
+		{
+			try
+			{
+				static_cast<Name*>(self)->Name::dispose();
+			}
+			catch (...)
+			{
+				StatusType::catchException(0);
+			}
+		}
+	};
+
+	template <typename Name, typename StatusType, typename Base = IDisposableImpl<Name, StatusType, Inherit<IVersionedImpl<Name, StatusType, Inherit<IUdrAggregateFactory> > > > >
+	class IUdrAggregateFactoryImpl : public IUdrAggregateFactoryBaseImpl<Name, StatusType, Base>
+	{
+	protected:
+		IUdrAggregateFactoryImpl(DoNotInherit = DoNotInherit())
+		{
+		}
+
+	public:
+		virtual ~IUdrAggregateFactoryImpl()
+		{
+		}
+
+		virtual void setup(StatusType* status, IExternalContext* context, IRoutineMetadata* metadata, IMetadataBuilder* inBuilder, IMetadataBuilder* outBuilder) = 0;
+		virtual IExternalAggregateFunction* newItem(StatusType* status, IExternalContext* context, IRoutineMetadata* metadata) = 0;
+	};
+
+	template <typename Name, typename StatusType, typename Base>
 	class IUdrProcedureFactoryBaseImpl : public Base
 	{
 	public:
@@ -20504,6 +20988,7 @@ namespace Firebird
 					this->registerFunction = &Name::cloopregisterFunctionDispatcher;
 					this->registerProcedure = &Name::cloopregisterProcedureDispatcher;
 					this->registerTrigger = &Name::cloopregisterTriggerDispatcher;
+					this->registerAggregateFunction = &Name::cloopregisterAggregateFunctionDispatcher;
 				}
 			} vTable;
 
@@ -20564,6 +21049,20 @@ namespace Firebird
 				StatusType::catchException(&status2);
 			}
 		}
+
+		static void CLOOP_CARG cloopregisterAggregateFunctionDispatcher(IUdrPlugin* self, IStatus* status, const char* name, IUdrAggregateFactory* factory) CLOOP_NOEXCEPT
+		{
+			StatusType status2(status);
+
+			try
+			{
+				static_cast<Name*>(self)->Name::registerAggregateFunction(&status2, name, factory);
+			}
+			catch (...)
+			{
+				StatusType::catchException(&status2);
+			}
+		}
 	};
 
 	template <typename Name, typename StatusType, typename Base = IVersionedImpl<Name, StatusType, Inherit<IUdrPlugin> > >
@@ -20583,6 +21082,7 @@ namespace Firebird
 		virtual void registerFunction(StatusType* status, const char* name, IUdrFunctionFactory* factory) = 0;
 		virtual void registerProcedure(StatusType* status, const char* name, IUdrProcedureFactory* factory) = 0;
 		virtual void registerTrigger(StatusType* status, const char* name, IUdrTriggerFactory* factory) = 0;
+		virtual void registerAggregateFunction(StatusType* status, const char* name, IUdrAggregateFactory* factory) = 0;
 	};
 
 	template <typename Name, typename StatusType, typename Base>

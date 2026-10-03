@@ -28,6 +28,7 @@
 #include "../common/classes/array.h"
 #include "../common/classes/fb_string.h"
 #include "../common/classes/SyncObject.h"
+#include "../jrd/tra.h"
 
 namespace Ods {
 
@@ -139,6 +140,7 @@ public:
 	TraNumber generateTransactionId();
 	AttNumber generateAttachmentId();
 	StmtNumber generateStatementId();
+	FB_UINT64 generateLocalTableId();
 	//void assignLatestTransactionId(TraNumber number);
 	void assignLatestAttachmentId(AttNumber number);
 	AttNumber getLatestAttachmentId() const;
@@ -157,6 +159,40 @@ public:
 	ULONG newMonitorGeneration() const
 	{
 		return m_tpcHeader->getHeader()->monitor_generation++ + 1;
+	}
+
+	static int cacheState(thread_db* tdbb, TraNumber number)
+	{
+		auto* tipCache = tdbb->getDatabase()->dbb_tip_cache;
+		if (!tipCache)
+			return tra_unknown;
+
+		CommitNumber stateCn = tipCache->cacheState(number);
+
+		switch (stateCn)
+		{
+		case CN_ACTIVE:	return tra_active;
+		case CN_LIMBO:	return tra_limbo;
+		case CN_DEAD:	return tra_dead;
+		default:		return tra_committed;
+		}
+	}
+
+	// check state of transaction in which some object was created or dropped
+	template <typename PRESENCE>
+	static int traState(thread_db* tdbb, TraNumber traNum, PRESENCE&& objPresenceFunc, bool created)
+	{
+		int rc = cacheState(tdbb, traNum);
+		if (rc == tra_committed)		// too old dead transaction may be reported as committed
+		{
+			// check presence of record for an object created in traNum
+			// if object really created => record should be present
+			// if object really dropped => record should be missing
+			// otherwise transaction is dead, not committed
+			if (objPresenceFunc() != created)
+				return tra_dead;
+		}
+		return rc;
 	}
 
 private:
@@ -180,6 +216,7 @@ private:
 		std::atomic<TraNumber> latest_transaction_id;
 		std::atomic<AttNumber> latest_attachment_id;
 		std::atomic<StmtNumber> latest_statement_id;
+		std::atomic<FB_UINT64> latest_local_table_id;
 
 		// Monitor state generation
 		std::atomic<ULONG> monitor_generation;
@@ -281,7 +318,7 @@ private:
 
 	typedef Firebird::BePlusTree<StatusBlockData*, TpcBlockNumber, StatusBlockData> BlocksMemoryMap;
 
-	static constexpr ULONG TPC_VERSION = 2;
+	static constexpr ULONG TPC_VERSION = 3;
 	static constexpr int SAFETY_GAP_BLOCKS = 1;
 
 	Firebird::SharedMemory<GlobalTpcHeader>* m_tpcHeader; // final
@@ -339,14 +376,7 @@ private:
 
 inline int TPC_cache_state(thread_db* tdbb, TraNumber number)
 {
-	const CommitNumber stateCn = tdbb->getDatabase()->dbb_tip_cache->cacheState(number);
-	switch (stateCn)
-	{
-	case CN_ACTIVE:	return tra_active;
-	case CN_LIMBO:	return tra_limbo;
-	case CN_DEAD:	return tra_dead;
-	default:		return tra_committed;
-	}
+	return TipCache::cacheState(tdbb, number);
 }
 
 inline TraNumber TPC_find_states(thread_db* tdbb, TraNumber minNumber, TraNumber maxNumber,

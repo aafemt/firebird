@@ -43,6 +43,7 @@
 #include "../dsql/make_proto.h"
 #include "../dsql/pass1_proto.h"
 #include "../dsql/DSqlDataTypeUtil.h"
+#include "../jrd/cvt2_proto.h"
 
 using namespace Firebird;
 using namespace Jrd;
@@ -462,12 +463,39 @@ BoolExprNode* ComparativeBoolNode::dsqlPass(DsqlCompilerScratch* dsqlScratch)
 		fb_assert(false);
 	}
 
+	procArg1 = doDsqlPass(dsqlScratch, procArg1);
 	procArg2 = doDsqlPass(dsqlScratch, procArg2);
+	procArg3 = doDsqlPass(dsqlScratch, procArg3);
+
+
+	const auto convertLiteralToOperand =
+		[&](NestConst<ValueExprNode>& literalArg, NestConst<ValueExprNode>& referenceArg)
+		{
+			LiteralNode* const literal = nodeAs<LiteralNode>(literalArg);
+
+			if (!literal || literal->litDesc.dsc_dtype != dtype_text)
+				return;
+
+			dsc referenceDesc;
+			DsqlDescMaker::fromNode(dsqlScratch, &referenceDesc, referenceArg);
+
+			if (referenceDesc.isUnknown())
+				return;
+
+			if (ValueExprNode* const value = MAKE_constant_from_literal(literal, &referenceDesc))
+				literalArg = value;
+		};
+
+	convertLiteralToOperand(procArg1, procArg2);
+	convertLiteralToOperand(procArg2, procArg1);
+
+	if (blrOp == blr_between)
+		convertLiteralToOperand(procArg3, procArg1);
 
 	ComparativeBoolNode* node = FB_NEW_POOL(dsqlScratch->getPool()) ComparativeBoolNode(dsqlScratch->getPool(), blrOp,
-		doDsqlPass(dsqlScratch, procArg1),
+		procArg1,
 		procArg2,
-		doDsqlPass(dsqlScratch, procArg3));
+		procArg3);
 
 	if (dsqlCheckBoolean)
 	{
@@ -891,16 +919,17 @@ TriState ComparativeBoolNode::stringBoolean(thread_db* tdbb, Request* request,
 {
 	SET_TDBB(tdbb);
 
-	USHORT type1;
+	TTypeId type1;
 
 	if (!desc1->isBlob())
-		type1 = INTL_TEXT_TYPE(*desc1);
+		type1 = desc1->getTextType();
 	else
 	{
 		// No MATCHES support for blob
 		if (blrOp == blr_matching)
 			return TriState(false);
 
+		// Non-text blob is treated here as NONE, not OCTETS
 		type1 = desc1->dsc_sub_type == isc_blob_text ? desc1->dsc_blob_ttype() : ttype_none;
 	}
 
@@ -954,7 +983,7 @@ TriState ComparativeBoolNode::stringBoolean(thread_db* tdbb, Request* request,
 	}
 
 	UCHAR* patternStr = nullptr;
-	SLONG patternLen = 0;
+	ULONG patternLen = 0;
 	MoveBuffer patternBuffer;
 
 	auto createMatcher = [&]()
@@ -1103,17 +1132,7 @@ bool ComparativeBoolNode::sleuth(thread_db* tdbb, Request* request,
 
 	// Choose interpretation for the operation
 
- 	USHORT ttype;
-	if (desc1->isBlob())
-	{
-		if (desc1->dsc_sub_type == isc_blob_text)
-			ttype = desc1->dsc_blob_ttype();	// Load blob character set and collation
-		else
-			ttype = INTL_TTYPE(desc2);
-	}
-	else
-		ttype = INTL_TTYPE(desc1);
-
+	const auto ttype = (desc1->isBlob() && (desc1->dsc_sub_type != isc_blob_text) ? desc2 : desc1)->getTextType();
 	Collation* obj = INTL_texttype_lookup(tdbb, ttype);
 
 	// Get operator definition string (control string)
@@ -1242,7 +1261,9 @@ string InListBoolNode::internalPrint(NodePrinter& printer) const
 {
 	BoolExprNode::internalPrint(printer);
 
+#ifndef TRIVIAL_NODE_PRINTER
 	NODE_PRINT(printer, blrOp);
+#endif
 	NODE_PRINT(printer, arg);
 	NODE_PRINT(printer, list);
 

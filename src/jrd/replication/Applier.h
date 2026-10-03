@@ -124,17 +124,14 @@ namespace Jrd
 			jrd_tra* const m_transaction;
 		};
 */
-	public:
+	private:
 		Applier(Firebird::MemoryPool& pool,
 				const Firebird::PathName& database,
-				Request* request, bool cascade)
-			: PermanentStorage(pool),
-			  m_txnMap(pool), m_database(pool, database),
-			  m_request(request), m_enableCascade(cascade),
-			  m_constraintIndexMap(pool)
-		{}
+				Request* request, bool cascade);
 
+	public:
 		static Applier* create(thread_db* tdbb);
+		~Applier();
 
 		void process(thread_db* tdbb, ULONG length, const UCHAR* data);
 		void cleanupTransactions(thread_db* tdbb);
@@ -185,12 +182,12 @@ namespace Jrd
 					   ULONG length, const UCHAR* data);
 
 		void executeSql(thread_db* tdbb, TraNumber traNum,
-						unsigned charset,
+						CSetId charset,
 						const Firebird::string& schemaSearchPath,
 						const Firebird::string& sql,
 						const MetaName& owner);
 
-		bool lookupKey(thread_db* tdbb, jrd_rel* relation, index_desc& idx);
+		bool lookupKey(thread_db* tdbb, Cached::Relation* relation, index_desc& idx);
 		bool compareKey(thread_db* tdbb, jrd_rel* relation,
 						const index_desc& idx,
 						Record* record1, Record* record2);

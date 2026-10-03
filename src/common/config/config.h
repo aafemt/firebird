@@ -136,6 +136,7 @@ enum ConfigKey
 	KEY_DEADLOCK_TIMEOUT,
 	KEY_REMOTE_SERVICE_NAME,
 	KEY_REMOTE_SERVICE_PORT,
+	KEY_REMOTE_SERVICE_UNIX_SOCKET,
 	KEY_IPC_NAME,
 	KEY_MAX_UNFLUSHED_WRITES,
 	KEY_MAX_UNFLUSHED_WRITE_TIME,
@@ -186,6 +187,7 @@ enum ConfigKey
 	KEY_PARALLEL_WORKERS,
 	KEY_MAX_PARALLEL_WORKERS,
 	KEY_OPTIMIZE_FOR_FIRST_ROWS,
+	KEY_ALLOW_UPDATE_OVERWRITE,
 	MAX_CONFIG_KEY		// keep it last
 };
 
@@ -228,6 +230,7 @@ inline constexpr ConfigEntry entries[MAX_CONFIG_KEY] =
 	{TYPE_INTEGER,	"DeadlockTimeout",			false,	10},		// seconds
 	{TYPE_STRING,	"RemoteServiceName",		false,	FB_SERVICE_NAME},
 	{TYPE_INTEGER,	"RemoteServicePort",		false,	0},
+	{TYPE_STRING,	"RemoteServiceUnixSocket",	true,	nullptr},
 	{TYPE_STRING,	"IpcName",					false,	FB_IPC_NAME},
 #ifdef WIN_NT
 	{TYPE_INTEGER,	"MaxUnflushedWrites",		false,	100},
@@ -298,7 +301,8 @@ inline constexpr ConfigEntry entries[MAX_CONFIG_KEY] =
 	{TYPE_INTEGER,	"MaxStatementCacheSize",	false,	2 * 1048576},	// bytes
 	{TYPE_INTEGER,	"ParallelWorkers",			true,	1},
 	{TYPE_INTEGER,	"MaxParallelWorkers",		true,	1},
-	{TYPE_BOOLEAN,	"OptimizeForFirstRows",		false,	false}
+	{TYPE_BOOLEAN,	"OptimizeForFirstRows",		false,	false},
+	{TYPE_BOOLEAN,	"AllowUpdateOverwrite",		false,	true}
 };
 
 
@@ -519,6 +523,9 @@ public:
 	// Service port for INET
 	CONFIG_GET_PER_DB_KEY(unsigned short, getRemoteServicePort, KEY_REMOTE_SERVICE_PORT, getInt);
 
+	// Unix domain socket for remote protocol
+	CONFIG_GET_GLOBAL_STR(getRemoteServiceUnixSocket, KEY_REMOTE_SERVICE_UNIX_SOCKET);
+
 	// Name for IPC-related objects
 	CONFIG_GET_PER_DB_STR(getIpcName, KEY_IPC_NAME);
 
@@ -619,6 +626,8 @@ public:
 	CONFIG_GET_GLOBAL_INT(getMaxParallelWorkers, KEY_MAX_PARALLEL_WORKERS);
 
 	CONFIG_GET_PER_DB_BOOL(getOptimizeForFirstRows, KEY_OPTIMIZE_FOR_FIRST_ROWS);
+
+	CONFIG_GET_PER_DB_BOOL(getAllowUpdateOverwrite, KEY_ALLOW_UPDATE_OVERWRITE);
 };
 
 // Implementation of interface to access master configuration file

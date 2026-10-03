@@ -42,6 +42,7 @@
 #include "../../jrd/status.h"
 #include "../../jrd/Function.h"
 #include "../../jrd/RuntimeStatistics.h"
+#include "../../jrd/Statement.h"
 #include "../../jrd/trace/TraceSession.h"
 #include "../../common/classes/ImplementHelper.h"
 #include "../../common/prett_proto.h"
@@ -70,23 +71,7 @@ public:
 		return m_statement ? m_statement->getStatementId() : 0;
 	}
 
-	Firebird::string getName() const
-	{
-		if (m_statement)
-		{
-			if (m_statement->procedure)
-				return m_statement->procedure->getName().toQuotedString();
-
-			if (m_statement->function)
-				return m_statement->function->getName().toQuotedString();
-
-			if (m_statement->triggerName.object.hasData())
-				return m_statement->triggerName.toQuotedString();
-		}
-
-		return "";
-	}
-
+	Firebird::string getName() const;
 	const char* ensurePlan(bool explained);
 
 private:
@@ -96,7 +81,7 @@ private:
 };
 
 
-class TraceRuntimeStats :
+class TraceRuntimeStats final :
 	public Firebird::AutoIface<Firebird::IPerformanceStatsImpl<TraceRuntimeStats, Firebird::CheckStatusWrapper> >
 {
 	static constexpr unsigned GLOBAL_COUNTERS = 4; // PerformanceInfo::{FETCHES|READS|MARKS|WRITES}
@@ -217,11 +202,11 @@ private:
 };
 
 
-class TraceConnectionImpl :
+class TraceConnectionImpl final :
 	public Firebird::AutoIface<Firebird::ITraceDatabaseConnectionImpl<TraceConnectionImpl, Firebird::CheckStatusWrapper> >
 {
 public:
-	TraceConnectionImpl(const Attachment* att) :
+	TraceConnectionImpl(Attachment* att) :
 		m_att(att)
 	{}
 
@@ -240,11 +225,11 @@ public:
 	ISC_INT64 getConnectionID();
 	const char* getDatabaseName();
 private:
-	const Attachment* const m_att;
+	Attachment* const m_att;
 };
 
 
-class TraceTransactionImpl :
+class TraceTransactionImpl final :
 	public Firebird::AutoIface<Firebird::ITraceTransactionImpl<TraceTransactionImpl, Firebird::CheckStatusWrapper> >
 {
 public:
@@ -328,7 +313,7 @@ private:
 };
 
 
-class TraceBLRStatementImpl : public BLRPrinter<TraceBLRStatementImpl>
+class TraceBLRStatementImpl final : public BLRPrinter<TraceBLRStatementImpl>
 {
 public:
 	TraceBLRStatementImpl(const Statement* stmt, TraceRuntimeStats* stats) :
@@ -358,7 +343,7 @@ private:
 };
 
 
-class TraceFailedBLRStatement : public BLRPrinter<TraceFailedBLRStatement>
+class TraceFailedBLRStatement final : public BLRPrinter<TraceFailedBLRStatement>
 {
 public:
 	TraceFailedBLRStatement(const unsigned char* blr, unsigned length) :
@@ -371,7 +356,7 @@ public:
 };
 
 
-class TraceSQLStatementImpl :
+class TraceSQLStatementImpl final :
 	public Firebird::AutoIface<Firebird::ITraceSQLStatementImpl<TraceSQLStatementImpl, Firebird::CheckStatusWrapper> >,
 	public StatementHolder
 {
@@ -414,7 +399,7 @@ public:
 	}
 
 private:
-	class DSQLParamsImpl :
+	class DSQLParamsImpl final :
 		public Firebird::AutoIface<Firebird::ITraceParamsImpl<DSQLParamsImpl, Firebird::CheckStatusWrapper> >
 	{
 	public:
@@ -442,7 +427,7 @@ private:
 };
 
 
-class TraceFailedSQLStatement :
+class TraceFailedSQLStatement final :
 	public Firebird::AutoIface<Firebird::ITraceSQLStatementImpl<TraceFailedSQLStatement, Firebird::CheckStatusWrapper> >
 {
 public:
@@ -466,7 +451,7 @@ private:
 };
 
 
-class TraceContextVarImpl :
+class TraceContextVarImpl final :
 	public Firebird::AutoIface<Firebird::ITraceContextVariableImpl<TraceContextVarImpl, Firebird::CheckStatusWrapper> >
 {
 public:
@@ -491,7 +476,7 @@ private:
 // forward declaration
 class TraceDescriptors;
 
-class TraceParamsImpl :
+class TraceParamsImpl final :
 	public Firebird::AutoIface<Firebird::ITraceParamsImpl<TraceParamsImpl, Firebird::CheckStatusWrapper> >
 {
 public:
@@ -517,6 +502,8 @@ public:
 		m_traceParams(this)
 	{
 	}
+
+	virtual ~TraceDescriptors() = default;
 
 	FB_SIZE_T getCount()
 	{
@@ -549,7 +536,7 @@ private:
 };
 
 
-class TraceDscFromValues : public TraceDescriptors
+class TraceDscFromValues final : public TraceDescriptors
 {
 public:
 	TraceDscFromValues(Request* request, const ValueListNode* params) :
@@ -558,7 +545,7 @@ public:
 	{}
 
 protected:
-	void fillParams();
+	void fillParams() override;
 
 private:
 	Request* const m_request;
@@ -566,7 +553,7 @@ private:
 };
 
 
-class TraceDscFromMsg : public TraceDescriptors
+class TraceDscFromMsg final : public TraceDescriptors
 {
 public:
 	TraceDscFromMsg(const Format* format, const UCHAR* inMsg, ULONG inMsgLength) :
@@ -576,7 +563,7 @@ public:
 	{}
 
 protected:
-	void fillParams();
+	void fillParams() override;
 
 private:
 	const Format* const m_format;
@@ -585,7 +572,7 @@ private:
 };
 
 
-class TraceDscFromDsc : public TraceDescriptors
+class TraceDscFromDsc final : public TraceDescriptors
 {
 public:
 	TraceDscFromDsc(const dsc* desc)
@@ -600,11 +587,11 @@ public:
 	}
 
 protected:
-	void fillParams() {}
+	void fillParams() override {}
 };
 
 
-class TraceProcedureImpl :
+class TraceProcedureImpl final :
 	public Firebird::AutoIface<Firebird::ITraceProcedureImpl<TraceProcedureImpl, Firebird::CheckStatusWrapper> >,
 	public StatementHolder
 {
@@ -666,7 +653,7 @@ private:
 };
 
 
-class TraceFunctionImpl :
+class TraceFunctionImpl final :
 	public Firebird::AutoIface<Firebird::ITraceFunctionImpl<TraceFunctionImpl, Firebird::CheckStatusWrapper> >,
 	public StatementHolder
 {
@@ -737,7 +724,7 @@ private:
 };
 
 
-class TraceTriggerImpl :
+class TraceTriggerImpl final :
 	public Firebird::AutoIface<Firebird::ITraceTriggerImpl<TraceTriggerImpl, Firebird::CheckStatusWrapper> >,
 	public StatementHolder
 {
@@ -756,7 +743,7 @@ public:
 		StatementHolder(request),
 		m_name(getName()),
 		m_relationName((request->req_rpb.hasData() && request->req_rpb[0].rpb_relation) ?
-			request->req_rpb[0].rpb_relation->rel_name.toQuotedString() : ""),
+			request->req_rpb[0].rpb_relation->getName().toQuotedString() : ""),
 		m_which(which),
 		m_action(request->req_trigger_action),
 		m_stats(stats)
@@ -817,7 +804,7 @@ private:
 };
 
 
-class TraceServiceImpl :
+class TraceServiceImpl final :
 	public Firebird::AutoIface<Firebird::ITraceServiceConnectionImpl<TraceServiceImpl, Firebird::CheckStatusWrapper> >
 {
 public:
@@ -845,11 +832,11 @@ private:
 };
 
 
-class TraceInitInfoImpl :
+class TraceInitInfoImpl final :
 	public Firebird::AutoIface<Firebird::ITraceInitInfoImpl<TraceInitInfoImpl, Firebird::CheckStatusWrapper> >
 {
 public:
-	TraceInitInfoImpl(const Firebird::TraceSession& session, const Attachment* att,
+	TraceInitInfoImpl(const Firebird::TraceSession& session, Attachment* att,
 					const char* filename) :
 		m_session(session),
 		m_trace_conn(att),
@@ -868,6 +855,7 @@ public:
 
 	const char* getFirebirdRootDirectory();
 	const char* getDatabaseName()		{ return m_filename; }
+	unsigned getTraceSessionFlags()			{ return m_session.ses_flags; }
 
 	Firebird::ITraceDatabaseConnection* getConnection()
 	{
@@ -888,7 +876,7 @@ private:
 };
 
 
-class TraceStatusVectorImpl :
+class TraceStatusVectorImpl final :
 	public Firebird::AutoIface<Firebird::ITraceStatusVectorImpl<TraceStatusVectorImpl, Firebird::CheckStatusWrapper> >
 {
 public:
@@ -922,7 +910,7 @@ private:
 	Kind kind;
 };
 
-class TraceSweepImpl :
+class TraceSweepImpl final :
 	public Firebird::AutoIface<Firebird::ITraceSweepInfoImpl<TraceSweepImpl, Firebird::CheckStatusWrapper> >
 {
 public:

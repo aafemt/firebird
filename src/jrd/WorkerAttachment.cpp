@@ -34,10 +34,11 @@
 #include "../common/classes/ClumpletWriter.h"
 #include "../jrd/jrd.h"
 #include "../jrd/ini_proto.h"
-#include "../jrd/lck_proto.h"
+#include "../jrd/lck.h"
 #include "../jrd/pag_proto.h"
 #include "../jrd/tra_proto.h"
 #include "../jrd/status.h"
+#include "../jrd/Monitoring.h"
 
 
 using namespace Firebird;
@@ -64,7 +65,6 @@ WorkerStableAttachment::WorkerStableAttachment(FbStatusVector* status, Jrd::Atta
 	BackgroundContextHolder tdbb(attachment->att_database, attachment, status, FB_FUNCTION);
 
 	LCK_init(tdbb, LCK_OWNER_attachment);
-	INI_init(tdbb);
 	PAG_header(tdbb, true);
 	PAG_attachment_id(tdbb);
 	TRA_init(attachment);
@@ -121,15 +121,16 @@ void WorkerStableAttachment::fini()
 		Database* dbb = attachment->att_database;
 
 		FbLocalStatus status_vector;
-		BackgroundContextHolder tdbb(dbb, attachment, &status_vector, FB_FUNCTION);
+		ThreadContextHolder tdbb(dbb, attachment, &status_vector);
+		DatabaseContextHolder dbHolder(tdbb);
 
 		Monitoring::cleanupAttachment(tdbb);
 		dbb->dbb_extManager->closeAttachment(tdbb, attachment);
 
+		attachment->rollbackMetaTransaction(tdbb);
+
 		attachment->releaseLocks(tdbb);
 		LCK_fini(tdbb, LCK_OWNER_attachment);
-
-		attachment->releaseRelations(tdbb);
 	}
 
 	destroy(attachment);

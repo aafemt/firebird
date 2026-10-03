@@ -108,7 +108,6 @@ void InnerJoin::calculateStreamInfo()
 		innerStream->baseIndexes = candidate->indexes;
 		innerStream->baseUnique = candidate->unique;
 		innerStream->baseNavigated = candidate->navigated;
-		innerStream->baseConjuncts = candidate->conjuncts;
 
 		csb->csb_rpt[innerStream->number].deactivate();
 	}
@@ -187,17 +186,16 @@ void InnerJoin::estimateCost(unsigned position,
 	fb_assert(!position || candidate->dependencies);
 
 	// Remember selectivity of this stream
-	joinedStreams[position].selectivity = candidate->selectivity;
+	joinedStreams[position].selectivity = candidate->matchSelectivity;
+
+	// Calculate the nested loop cost, it's our default option
+	const auto loopCost = candidate->cost * cardinality;
+	cost = loopCost;
 
 	// Get the stream cardinality
 	const auto streamCardinality = csb->csb_rpt[stream->number].csb_cardinality;
 
-	// If the table looks like empty during preparation time, we cannot be sure about
-	// its real cardinality during execution. So, unless we have some index-based
-	// filtering applied, let's better be pessimistic and avoid hash joining due to
-	// likely cardinality under-estimation.
-	const bool avoidHashJoin = (streamCardinality <= MINIMUM_CARDINALITY && !stream->baseIndexes);
-
+	// Calculate the retrieval cardinality
 	auto currentCardinality = streamCardinality * candidate->selectivity;
 
 	// Given the "first-rows" mode specified (or implied)
@@ -212,9 +210,17 @@ void InnerJoin::estimateCost(unsigned position,
 	if ((candidate->unique || firstRows) && currentCardinality > MINIMUM_CARDINALITY)
 		currentCardinality = MINIMUM_CARDINALITY;
 
-	// Calculate the nested loop cost, it's our default option
-	const auto loopCost = candidate->cost * cardinality;
-	cost = loopCost;
+	// If the table looks like empty during preparation time, we cannot be sure about
+	// its real cardinality during execution. So, unless we have some index-based
+	// filtering applied, let's better be pessimistic and avoid hash joining due to
+	// likely cardinality under-estimation.
+	bool avoidHashJoin = (streamCardinality <= MINIMUM_CARDINALITY && !stream->baseIndexes);
+
+	// If the user-defined plan is provided and we were able to utilize indices for this retrieval,
+	// then such indices were explicitly specified in the plan.
+	// It means the user seems to prefers a loop-join over a hash-join.
+	if (csb->csb_rpt[stream->number].csb_plan && candidate->indexes && candidate->dependencies)
+		avoidHashJoin = true;
 
 	// Consider whether the current stream can be hash-joined to the prior ones.
 	// Beware conditional retrievals, this is impossible for them.
@@ -271,7 +277,7 @@ void InnerJoin::estimateCost(unsigned position,
 		}
 	}
 
-	cardinality = MAX(currentCardinality, MINIMUM_CARDINALITY);
+	cardinality = currentCardinality;
 }
 
 

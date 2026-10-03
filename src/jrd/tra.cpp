@@ -37,6 +37,7 @@
 #include "../jrd/req.h"
 #include "../jrd/exe.h"
 #include "../jrd/extds/ExtDS.h"
+#include "../jrd/met.h"
 #include "../jrd/intl_classes.h"
 #include "../common/ThreadStart.h"
 #include "../jrd/TimeZone.h"
@@ -52,7 +53,7 @@
 #include "../jrd/idx_proto.h"
 #include "../yvalve/gds_proto.h"
 #include "../common/isc_proto.h"
-#include "../jrd/lck_proto.h"
+#include "../jrd/lck.h"
 #include "../jrd/met_proto.h"
 #include "../jrd/mov_proto.h"
 #include "../jrd/pag_proto.h"
@@ -75,7 +76,9 @@
 #include "../jrd/Collation.h"
 #include "../jrd/Mapping.h"
 #include "../jrd/DbCreators.h"
+#include "../jrd/BulkInsert.h"
 #include "../common/os/fbsyslog.h"
+#include "../jrd/Resources.h"
 #include "firebird/impl/msg_helper.h"
 
 
@@ -98,8 +101,6 @@ static tx_inv_page* fetch_inventory_page(thread_db*, WIN* window, ULONG sequence
 static constexpr const char* get_lockname_v3(const UCHAR lock) noexcept;
 static ULONG inventory_page(thread_db*, ULONG);
 static int limbo_transaction(thread_db*, TraNumber id);
-static void release_temp_tables(thread_db*, jrd_tra*);
-static void retain_temp_tables(thread_db*, jrd_tra*, TraNumber);
 static void restart_requests(thread_db*, jrd_tra*);
 static void start_sweeper(thread_db*);
 //static THREAD_ENTRY_DECLARE sweep_database(THREAD_ENTRY_PARAM);
@@ -209,6 +210,7 @@ void TRA_attach_request(Jrd::jrd_tra* transaction, Jrd::Request* request)
 		TRA_detach_request(request);
 	}
 
+	fb_assert(request->isUsed());
 	fb_assert(request->req_transaction == NULL);
 	fb_assert(request->req_tra_next == NULL);
 	fb_assert(request->req_tra_prev == NULL);
@@ -484,6 +486,10 @@ void TRA_commit(thread_db* tdbb, jrd_tra* transaction, const bool retaining_flag
 
 	if (!(transaction->tra_flags & TRA_prepared))
 		DFW_perform_work(tdbb, transaction);
+
+	// Finish bulk insert operation, if any
+
+	transaction->finiBulkInsert(tdbb, true);
 
 	// Commit associated transaction in security DB
 
@@ -947,7 +953,7 @@ void TRA_update_counters(thread_db* tdbb, Database* dbb)
 }
 
 
-void TRA_post_resources(thread_db* tdbb, jrd_tra* transaction, ResourceList& resources)
+void jrd_tra::postResources(thread_db* tdbb, const Resources* resources)
 {
 /**************************************
  *
@@ -956,54 +962,28 @@ void TRA_post_resources(thread_db* tdbb, jrd_tra* transaction, ResourceList& res
  **************************************
  *
  * Functional description
- *	Post interest in relation/procedure/collation existence to transaction.
- *	This guarantees that the relation/procedure/collation won't be dropped
- *	out from under the transaction.
+ *	Post interest in external relation existence to transaction.
  *
  **************************************/
 	SET_TDBB(tdbb);
 
-	Jrd::ContextPoolHolder context(tdbb, transaction->tra_pool);
-
-	for (Resource* rsc = resources.begin(); rsc < resources.end(); rsc++)
+	for (auto& rel : resources->relations)
 	{
-		if (rsc->rsc_type == Resource::rsc_relation ||
-			rsc->rsc_type == Resource::rsc_procedure ||
-			rsc->rsc_type == Resource::rsc_function ||
-			rsc->rsc_type == Resource::rsc_collation)
+		if (auto* ext = rel()->getExtFile())
 		{
-			FB_SIZE_T i;
-			if (!transaction->tra_resources.find(*rsc, i))
+			FB_SIZE_T pos;
+			if (!traExtRel.find(ext, pos))
 			{
-				transaction->tra_resources.insert(i, *rsc);
-				switch (rsc->rsc_type)
-				{
-				case Resource::rsc_relation:
-					MET_post_existence(tdbb, rsc->rsc_rel);
-					if (rsc->rsc_rel->rel_file) {
-						EXT_tra_attach(rsc->rsc_rel->rel_file, transaction);
-					}
-					break;
-				case Resource::rsc_procedure:
-				case Resource::rsc_function:
-					rsc->rsc_routine->addRef();
-#ifdef DEBUG_PROCS
-					{
-						char buffer[BUFFER_MEDIUM];
-						snprintf(buffer, sizeof(buffer),
-								"Called from TRA_post_resources():\n\t Incrementing use count of %s\n",
-								rsc->rsc_routine->prc_name->c_str());
-						JRD_print_procedure_info(tdbb, buffer);
-					}
-#endif
-					break;
-				case Resource::rsc_collation:
-					rsc->rsc_coll->incUseCount(tdbb);
-					break;
-				default:
-					break;
-				}
+				ext->traAttach(tdbb);
+				traExtRel.insert(pos, ext);
 			}
+		}
+
+		if (rel()->rel_flags & REL_temp_ltt)
+		{
+			FB_SIZE_T pos;
+			if (!traLttRel.find(rel(), pos))
+				traLttRel.insert(pos, rel());
 		}
 	}
 }
@@ -1104,6 +1084,10 @@ void TRA_prepare(thread_db* tdbb, jrd_tra* transaction, USHORT length, const UCH
 
 	DFW_perform_work(tdbb, transaction);
 
+	// Finish bulk insert operation, if any
+
+	transaction->finiBulkInsert(tdbb, true);
+
 	// Flush pages if transaction logically modified data
 	const jrd_tra* sysTran = tdbb->getAttachment()->getSysTransaction();
 
@@ -1140,7 +1124,7 @@ jrd_tra* TRA_reconnect(thread_db* tdbb, const UCHAR* id, USHORT length)
  *
  **************************************/
 	SET_TDBB(tdbb);
-	const Database* const dbb = tdbb->getDatabase();
+	Database* const dbb = tdbb->getDatabase();
 	CHECK_DBB(dbb);
 	Jrd::Attachment* const attachment = tdbb->getAttachment();
 
@@ -1184,7 +1168,7 @@ jrd_tra* TRA_reconnect(thread_db* tdbb, const UCHAR* id, USHORT length)
 				 Arg::Gds(isc_tra_state) << Arg::Int64(number) << Arg::Str(text));
 	}
 
-	MemoryPool* const pool = attachment->createPool();
+	MemoryPool* const pool = dbb->createPool();
 	Jrd::ContextPoolHolder context(tdbb, pool);
 	jrd_tra* const trans = jrd_tra::create(pool, attachment, NULL);
 	trans->tra_number = number;
@@ -1261,32 +1245,11 @@ void TRA_release_transaction(thread_db* tdbb, jrd_tra* transaction, Jrd::TraceTr
 			TRA_detach_request(transaction->tra_requests);
 	}
 
-	// Release interest in relation/procedure existence for transaction
+	// Care about used external files
+	while (transaction->traExtRel.hasData())
+		transaction->traExtRel.pop()->traDetach();
 
-	for (Resource* rsc = transaction->tra_resources.begin();
-		rsc < transaction->tra_resources.end(); rsc++)
-	{
-		switch (rsc->rsc_type)
-		{
-		case Resource::rsc_relation:
-			MET_release_existence(tdbb, rsc->rsc_rel);
-			if (rsc->rsc_rel->rel_file) {
-				EXT_tra_detach(rsc->rsc_rel->rel_file, transaction);
-			}
-			break;
-		case Resource::rsc_procedure:
-		case Resource::rsc_function:
-			rsc->rsc_routine->release(tdbb);
-			break;
-		case Resource::rsc_collation:
-			rsc->rsc_coll->decUseCount(tdbb);
-			break;
-		default:
-			fb_assert(false);
-		}
-	}
-
-	release_temp_tables(tdbb, transaction);
+	MetadataCache::release_temp_tables(tdbb, transaction);
 
 	// Release the locks associated with the transaction
 
@@ -1386,6 +1349,10 @@ void TRA_rollback(thread_db* tdbb, jrd_tra* transaction, const bool retaining_fl
 	if (transaction->tra_flags & (TRA_prepare2 | TRA_reconnected))
 		MET_update_transaction(tdbb, transaction, false);
 
+	// Finish bulk insert operation, if any
+
+	transaction->finiBulkInsert(tdbb, false);
+
 	// If force flag is true, get rid of all savepoints to mark the transaction as dead
 	if (force_flag || (transaction->tra_flags & TRA_invalidated))
 	{
@@ -1464,9 +1431,12 @@ void TRA_rollback(thread_db* tdbb, jrd_tra* transaction, const bool retaining_fl
 		state = tra_committed;
 	}
 
-	const jrd_tra* const sysTran = tdbb->getAttachment()->getSysTransaction();
-	if (sysTran->tra_flags & TRA_write)
-		transaction_flush(tdbb, FLUSH_SYSTEM, 0);
+	if (!(tdbb->getDatabase()->dbb_flags & DBB_dropping))
+	{
+		const jrd_tra* const sysTran = tdbb->getAttachment()->getSysTransaction();
+		if (sysTran->tra_flags & TRA_write)
+			transaction_flush(tdbb, FLUSH_SYSTEM, 0);
+	}
 
 	// If this is a rollback retain abort this transaction and start a new one.
 
@@ -1706,14 +1676,14 @@ jrd_tra* TRA_start(thread_db* tdbb, ULONG flags, SSHORT lock_timeout, Jrd::jrd_t
  *
  **************************************/
 	SET_TDBB(tdbb);
-	const Database* const dbb = tdbb->getDatabase();
+	Database* const dbb = tdbb->getDatabase();
 	Jrd::Attachment* const attachment = tdbb->getAttachment();
 
 	// Starting new transactions should be allowed for threads which
 	// are running purge_attachment() because it's needed for
 	// ON DISCONNECT triggers
 	if (dbb->dbb_ast_flags & DBB_shut_tran &&
-		attachment->att_purge_tid != Thread::getId())
+		attachment->att_purge_tid != Thread::getCurrentThreadId())
 	{
 		ERR_post(Arg::Gds(isc_shutinprog) << Arg::Str(attachment->att_filename));
 	}
@@ -1721,7 +1691,7 @@ jrd_tra* TRA_start(thread_db* tdbb, ULONG flags, SSHORT lock_timeout, Jrd::jrd_t
 	// To handle the problems of relation locks, allocate a temporary
 	// transaction block first, seize relation locks, then go ahead and
 	// make up the real transaction block.
-	MemoryPool* const pool = outer ? outer->getAutonomousPool() : attachment->createPool();
+	MemoryPool* const pool = outer ? outer->getAutonomousPool() : dbb->createPool();
 	Jrd::ContextPoolHolder context(tdbb, pool);
 	jrd_tra* const transaction = jrd_tra::create(pool, attachment, outer);
 
@@ -1763,14 +1733,14 @@ jrd_tra* TRA_start(thread_db* tdbb, int tpb_length, const UCHAR* tpb, Jrd::jrd_t
  *
  **************************************/
 	SET_TDBB(tdbb);
-	const Database* dbb = tdbb->getDatabase();
+	Database* dbb = tdbb->getDatabase();
 	Jrd::Attachment* attachment = tdbb->getAttachment();
 
 	// Starting new transactions should be allowed for threads which
 	// are running purge_attachment() because it's needed for
 	// ON DISCONNECT triggers
 	if (dbb->dbb_ast_flags & DBB_shut_tran &&
-		attachment->att_purge_tid != Thread::getId())
+		attachment->att_purge_tid != Thread::getCurrentThreadId())
 	{
 		ERR_post(Arg::Gds(isc_shutinprog) << Arg::Str(attachment->att_filename));
 	}
@@ -1778,7 +1748,7 @@ jrd_tra* TRA_start(thread_db* tdbb, int tpb_length, const UCHAR* tpb, Jrd::jrd_t
 	// To handle the problems of relation locks, allocate a temporary
 	// transaction block first, seize relation locks, then go ahead and
 	// make up the real transaction block.
-	MemoryPool* const pool = outer ? outer->getAutonomousPool() : attachment->createPool();
+	MemoryPool* const pool = outer ? outer->getAutonomousPool() : dbb->createPool();
 	Jrd::ContextPoolHolder context(tdbb, pool);
 	jrd_tra* const transaction = jrd_tra::create(pool, attachment, outer);
 
@@ -1962,7 +1932,7 @@ void TRA_sweep(thread_db* tdbb)
 }
 
 
-int TRA_wait(thread_db* tdbb, jrd_tra* trans, TraNumber number, jrd_tra::wait_t wait)
+int TRA_wait(thread_db* tdbb, jrd_tra* trans, TraNumber number, tra_wait_t wait)
 {
 /**************************************
  *
@@ -1988,12 +1958,12 @@ int TRA_wait(thread_db* tdbb, jrd_tra* trans, TraNumber number, jrd_tra::wait_t 
 	// Create, wait on, and release lock on target transaction.  If
 	// we can't get the lock due to deadlock
 
-	if (wait != jrd_tra::tra_no_wait)
+	if (wait != tra_no_wait)
 	{
 		Lock temp_lock(tdbb, sizeof(TraNumber), LCK_tra);
 		temp_lock.setKey(number);
 
-		const SSHORT timeout = (wait == jrd_tra::tra_wait) ? trans->getLockWait() : 0;
+		const SSHORT timeout = (wait == tra_wait) ? trans->getLockWait() : 0;
 
 		if (!LCK_lock(tdbb, &temp_lock, LCK_read, timeout))
 		{
@@ -2006,7 +1976,7 @@ int TRA_wait(thread_db* tdbb, jrd_tra* trans, TraNumber number, jrd_tra::wait_t 
 
 	int state = TRA_get_state(tdbb, number);
 
-	if (wait != jrd_tra::tra_no_wait && state == tra_committed)
+	if (wait != tra_no_wait && state == tra_committed)
 		return state;
 
 	if (state == tra_precommitted)
@@ -2190,7 +2160,7 @@ static void expand_view_lock(thread_db* tdbb, jrd_tra* transaction, jrd_rel* rel
 
 	// LCK_none < LCK_SR < LCK_PR < LCK_SW < LCK_EX
 	UCHAR oldlock;
-	const bool found = lockmap.get(relation->rel_id, oldlock);
+	const bool found = lockmap.get(relation->getId(), oldlock);
 
 	if (found && oldlock > lock_type)
 	{
@@ -2200,14 +2170,14 @@ static void expand_view_lock(thread_db* tdbb, jrd_tra* transaction, jrd_rel* rel
 		if (level)
 		{
 			lock_type = oldlock; // Preserve the old, more powerful lock.
-			ERR_post_warning(Arg::Warning(isc_tpb_reserv_stronger_wng) << relation->rel_name.toQuotedString() <<
+			ERR_post_warning(Arg::Warning(isc_tpb_reserv_stronger_wng) << relation->getName().toQuotedString() <<
 																		  Arg::Str(oldname) <<
 																		  Arg::Str(newname));
 		}
 		else
 		{
 			ERR_post(Arg::Gds(isc_bad_tpb_content) <<
-					 Arg::Gds(isc_tpb_reserv_stronger) << relation->rel_name.toQuotedString() <<
+					 Arg::Gds(isc_tpb_reserv_stronger) << relation->getName().toQuotedString() <<
 														  Arg::Str(oldname) <<
 														  Arg::Str(newname));
 		}
@@ -2220,14 +2190,14 @@ static void expand_view_lock(thread_db* tdbb, jrd_tra* transaction, jrd_rel* rel
 		if (relation->isVirtual())
 		{
 			ERR_post(Arg::Gds(isc_bad_tpb_content) <<
-					 Arg::Gds(isc_tpb_reserv_virtualtbl) << relation->rel_name.toQuotedString());
+					 Arg::Gds(isc_tpb_reserv_virtualtbl) << relation->getName().toQuotedString());
 		}
 
 		// Reject explicit attempts to take locks on system tables.
 		if (relation->isSystem())
 		{
 			ERR_post(Arg::Gds(isc_bad_tpb_content) <<
-		    		 Arg::Gds(isc_tpb_reserv_systbl) << relation->rel_name.toQuotedString());
+		    		 Arg::Gds(isc_tpb_reserv_systbl) << relation->getName().toQuotedString());
 		}
 
 		if (relation->isTemporary() && (lock_type == LCK_PR || lock_type == LCK_EX))
@@ -2235,7 +2205,7 @@ static void expand_view_lock(thread_db* tdbb, jrd_tra* transaction, jrd_rel* rel
 			ERR_post(Arg::Gds(isc_bad_tpb_content) <<
 					 Arg::Gds(isc_tpb_reserv_temptbl) << Arg::Str(get_lockname_v3(LCK_PR)) <<
 					 									 Arg::Str(get_lockname_v3(LCK_EX)) <<
-														 relation->rel_name.toQuotedString());
+														 relation->getName().toQuotedString());
 		}
 	}
 	else
@@ -2261,11 +2231,11 @@ static void expand_view_lock(thread_db* tdbb, jrd_tra* transaction, jrd_rel* rel
 	}
 
 	// set up the lock on the relation/view
-	Lock* lock = RLCK_transaction_relation_lock(tdbb, transaction, relation);
+	Lock* lock = RLCK_transaction_relation_lock(tdbb, transaction, getPermanent(relation));
 	lock->lck_logical = lock_type;
 
 	if (!found)
-		*lockmap.put(relation->rel_id) = lock_type;
+		*lockmap.put(relation->getId()) = lock_type;
 
 	const ViewContexts& ctx = relation->rel_view_contexts;
 
@@ -2274,18 +2244,15 @@ static void expand_view_lock(thread_db* tdbb, jrd_tra* transaction, jrd_rel* rel
 		if (ctx[i]->vcx_type == VCT_PROCEDURE)
 			continue;
 
-		jrd_rel* base_rel = MET_lookup_relation(tdbb, ctx[i]->vcx_relation_name);
+		jrd_rel* base_rel = MetadataCache::getVersioned<Cached::Relation>(tdbb, ctx[i]->vcx_relation_name, CacheFlag::AUTOCREATE);
 		if (!base_rel)
 		{
 			// should be a BUGCHECK
 			ERR_post(Arg::Gds(isc_bad_tpb_content) <<
 					 Arg::Gds(isc_tpb_reserv_baserelnotfound) << ctx[i]->vcx_relation_name.toQuotedString() <<
-																 relation->rel_name.toQuotedString() <<
+																 relation->getName().toQuotedString() <<
 																 Arg::Str(option_name));
 		}
-
-		// force a scan to read view information
-		MET_scan_relation(tdbb, base_rel);
 
 		expand_view_lock(tdbb, transaction, base_rel, lock_type, option_name, lockmap, level + 1);
 	}
@@ -2437,6 +2404,9 @@ static int limbo_transaction(thread_db* tdbb, TraNumber id)
 
 void jrd_tra::unlinkFromAttachment()
 {
+	if (tra_flags & TRA_meta)
+		return;						// Unlinked on creation
+
 	for (jrd_tra** ptr = &tra_attachment->att_transactions; *ptr; ptr = &(*ptr)->tra_next)
 	{
 		if (*ptr == this)
@@ -2479,7 +2449,7 @@ void jrd_tra::tra_abort(const char* reason)
 }
 
 
-static void release_temp_tables(thread_db* tdbb, jrd_tra* transaction)
+void MetadataCache::release_temp_tables(thread_db* tdbb, jrd_tra* transaction)
 {
 /**************************************
  *
@@ -2488,23 +2458,35 @@ static void release_temp_tables(thread_db* tdbb, jrd_tra* transaction)
  **************************************
  *
  * Functional description
- *	Release data of temporary tables with transaction lifetime
+ *	Release (delete pages) temporary tables with transaction lifetime (ON COMMIT DELETE ROWS).
+ *	This is called on full commit/rollback, not on commit retaining.
  *
  **************************************/
-	Attachment* att = tdbb->getAttachment();
-	vec<jrd_rel*>& rels = *att->att_relations;
-
-	for (FB_SIZE_T i = 0; i < rels.count(); i++)
+	// Release GTTs (Global Temporary Tables) with transaction lifetime
+	for (auto* relation : MetadataCache::get(tdbb)->mdc_relations)
 	{
-		jrd_rel* relation = rels[i];
-
-		if (relation && (relation->rel_flags & REL_temp_tran))
+		if (relation->rel_flags & REL_temp_tran)
 			relation->delPages(tdbb, transaction->tra_number);
+	}
+
+	// Release LTTs (Local Temporary Tables) with transaction lifetime
+	Attachment* att = tdbb->getAttachment();
+
+	for (const auto& lttEntry : att->att_local_temporary_tables)
+	{
+		const auto ltt = lttEntry.second;
+
+		if (ltt && ltt->relation)
+		{
+			auto *rel = ltt->relation->getPermanent();
+			if (rel->rel_flags & REL_temp_tran)
+				rel->delPages(tdbb, transaction->tra_number);
+		}
 	}
 }
 
 
-static void retain_temp_tables(thread_db* tdbb, jrd_tra* transaction, TraNumber new_number)
+void MetadataCache::retain_temp_tables(thread_db* tdbb, jrd_tra* transaction, TraNumber new_number)
 {
 /**************************************
  *
@@ -2514,18 +2496,27 @@ static void retain_temp_tables(thread_db* tdbb, jrd_tra* transaction, TraNumber 
  *
  * Functional description
  *	Reassign instance of temporary tables with transaction lifetime to the new
- *  transaction number (see retain_context).
+ *  transaction number (see retain_context). This is called on commit retaining
+ *  to preserve the data in ON COMMIT DELETE ROWS tables.
  *
  **************************************/
-	Attachment* att = tdbb->getAttachment();
-	vec<jrd_rel*>& rels = *att->att_relations;
 
-	for (FB_SIZE_T i = 0; i < rels.count(); i++)
+	// Retain GTTs (Global Temporary Tables) with transaction lifetime
+	for (auto* relation : MetadataCache::get(tdbb)->mdc_relations)
 	{
-		jrd_rel* relation = rels[i];
-
-		if (relation && (relation->rel_flags & REL_temp_tran))
+		if (relation->rel_flags & REL_temp_tran)
 			relation->retainPages(tdbb, transaction->tra_number, new_number);
+	}
+
+	// Retain LTTs (Local Temporary Tables) with transaction lifetime
+	Attachment* att = tdbb->getAttachment();
+
+	for (const auto& lttEntry : att->att_local_temporary_tables)
+	{
+		const auto ltt = lttEntry.second;
+
+		if (ltt && ltt->relation && (ltt->relation->getPermanent()->rel_flags & REL_temp_tran))
+			ltt->relation->getPermanent()->retainPages(tdbb, transaction->tra_number, new_number);
 	}
 }
 
@@ -2550,18 +2541,8 @@ static void restart_requests(thread_db* tdbb, jrd_tra* trans)
 		 i != trans->tra_attachment->att_requests.end();
 		 ++i)
 	{
-		Array<Request*>& requests = (*i)->getStatement()->requests;
-
-		for (Request** j = requests.begin(); j != requests.end(); ++j)
-		{
-			Request* request = *j;
-
-			if (request && request->req_transaction)
-			{
-				EXE_unwind(tdbb, request);
-				EXE_start(tdbb, request, trans);
-			}
-		}
+		auto* statement = (*i)->getStatement();
+		statement->restartRequests(tdbb, trans);
 	}
 }
 
@@ -2659,7 +2640,7 @@ static void retain_context(thread_db* tdbb, jrd_tra* transaction, bool commit, i
 		TRA_set_state(tdbb, transaction, old_number, state);
 	}
 
-	retain_temp_tables(tdbb, transaction, new_number);
+	MetadataCache::retain_temp_tables(tdbb, transaction, new_number);
 
 	transaction->tra_number = new_number;
 
@@ -3243,7 +3224,6 @@ static void transaction_options(thread_db* tdbb,
 					string(reinterpret_cast<const char*>(tpb), len));
 
 				tpb += len;
-
 				if (tpb < end && *tpb == isc_tpb_lock_table_schema)
 				{
 					// Do we have space for the identifier length?
@@ -3296,7 +3276,7 @@ static void transaction_options(thread_db* tdbb,
 
 				attachment->qualifyExistingName(tdbb, relationName, {obj_relation});
 
-				jrd_rel* relation = MET_lookup_relation(tdbb, relationName);
+				jrd_rel* relation = MetadataCache::getVersioned<Cached::Relation>(tdbb, relationName, CacheFlag::AUTOCREATE);
 				if (!relation)
 				{
 					ERR_post(
@@ -3304,9 +3284,6 @@ static void transaction_options(thread_db* tdbb,
 						Arg::Gds(isc_tpb_reserv_relnotfound) <<
 						relationName.toQuotedString() << Arg::Str(option_name));
 				}
-
-				// force a scan to read view information
-				MET_scan_relation(tdbb, relation);
 
 				UCHAR lock_type = (op == isc_tpb_lock_read) ? LCK_none : LCK_SW;
 				if (tpb < end)
@@ -3709,7 +3686,7 @@ static void transaction_start(thread_db* tdbb, jrd_tra* trans)
 				{
 					if (cleanup)
 					{
-						if (TRA_wait(tdbb, trans, active, jrd_tra::tra_no_wait) == tra_committed)
+						if (TRA_wait(tdbb, trans, active, tra_no_wait) == tra_committed)
 							cleanup = false;
 						continue;
 					}
@@ -3808,6 +3785,12 @@ static void transaction_start(thread_db* tdbb, jrd_tra* trans)
 		// Release TPC shared memory if counters moved sufficently forward
 		dbb->dbb_tip_cache->updateOldestTransaction(tdbb,
 			dbb->dbb_oldest_transaction, dbb->dbb_oldest_snapshot);
+
+		// Plumb remove really old objects from metadata cache
+		dbb->dbb_mdc->checkCleanup(tdbb, oldest);
+
+		// Also remove really old temporary pages of dropped relations
+		dbb->deleteTempPages(tdbb, trans->tra_oldest_active);
 
 		// If the transaction block is getting out of hand, force a sweep
 
@@ -3990,10 +3973,12 @@ Record* jrd_tra::findNextUndo(VerbAction* stopAction, jrd_rel* relation, SINT64 
  **************************************/
 {
 	UndoItem* result = NULL;
+	const auto tempInstanceId = (relation->getPermanent()->rel_flags & REL_temp_frame) ?
+		stopAction->vct_temp_instance_id : 0;
 
 	for (Savepoint::Iterator iter(tra_save_point); *iter; ++iter)
 	{
-		VerbAction* const action = (*iter)->getAction(relation);
+		VerbAction* const action = (*iter)->getAction(relation, tempInstanceId);
 
 		if (action == stopAction)
 			return result ? result->setupRecord(this) : NULL;
@@ -4006,7 +3991,7 @@ Record* jrd_tra::findNextUndo(VerbAction* stopAction, jrd_rel* relation, SINT64 
 	return NULL;
 }
 
-void jrd_tra::listStayingUndo(jrd_rel* relation, SINT64 number, RecordStack &staying)
+void jrd_tra::listStayingUndo(thread_db* tdbb, jrd_rel* relation, SINT64 number, RecordStack &staying)
 /**************************************
  *
  *	l i s t S t a y i n g U n d o
@@ -4019,9 +4004,11 @@ void jrd_tra::listStayingUndo(jrd_rel* relation, SINT64 number, RecordStack &sta
  *
  **************************************/
 {
+	const auto tempInstanceId = relation->getTempInstanceId(tdbb);
+
 	for (Savepoint::Iterator iter(tra_save_point); *iter; ++iter)
 	{
-		VerbAction* const action = (*iter)->getAction(relation);
+		VerbAction* const action = (*iter)->getAction(relation, tempInstanceId);
 
 		if (action && action->vct_undo && action->vct_undo->locate(number))
 			staying.push(action->vct_undo->current().setupRecord(this));
@@ -4125,6 +4112,20 @@ void jrd_tra::rollbackToSavepoint(thread_db* tdbb, SavNumber number)
 }
 
 
+void jrd_tra::discardTempFrameActions(const jrd_rel* relation, FB_UINT64 tempInstanceId)
+{
+	fb_assert(relation);
+	fb_assert(relation->getPermanent()->rel_flags & REL_temp_frame);
+	fb_assert(tempInstanceId);
+
+	for (auto transaction = this; transaction; transaction = transaction->tra_outer)
+	{
+		for (Savepoint::Iterator iter(transaction->tra_save_point); *iter; ++iter)
+			(*iter)->discardTempFrameActions(relation, tempInstanceId);
+	}
+}
+
+
 void jrd_tra::releaseSavepoint(thread_db* tdbb)
 /**************************************
  *
@@ -4160,23 +4161,14 @@ void jrd_tra::checkBlob(thread_db* tdbb, const bid* blob_id, jrd_fld* fld, bool 
 	if (!tra_blobs->locate(blob_id->bid_temp_id()) &&
 		!tra_fetched_blobs.locate(*blob_id))
 	{
-		vec<jrd_rel*>* vector = tra_attachment->att_relations;
-		jrd_rel* blb_relation;
-
-		if ((rel_id < vector->count() && (blb_relation = (*vector)[rel_id])) ||
-			(blb_relation = MET_relation(tdbb, rel_id)))
+		auto* blobRelation = MetadataCache::getPerm<Cached::Relation>(tdbb, rel_id, CacheFlag::AUTOCREATE);
+		if (blobRelation)
 		{
 			auto security_name = (fld && fld->fld_security_name.hasData()) ?
-				fld->fld_security_name : blb_relation->rel_security_name.object;
-
-			if (security_name.isEmpty())
-			{
-				MET_scan_relation(tdbb, blb_relation);
-				security_name = blb_relation->rel_security_name.object;
-			}
+				fld->fld_security_name : blobRelation->getSecurityName().object;
+			fb_assert(security_name.hasData());
 
 			SecurityClass* s_class = SCL_get_class(tdbb, security_name);
-
 			if (!s_class)
 				return;
 
@@ -4188,17 +4180,17 @@ void jrd_tra::checkBlob(thread_db* tdbb, const bid* blob_id, jrd_fld* fld, bool 
 				{
 					ThreadStatusGuard status_vector(tdbb);
 
-					SCL_check_schema(tdbb, blb_relation->rel_name.schema, SCL_usage);
+					SCL_check_schema(tdbb, blobRelation->getName().schema, SCL_usage);
 
 					if (fld)
 					{
 						SCL_check_access(tdbb, s_class, 0, {}, SCL_select, obj_column,
-							false, blb_relation->rel_name, fld->fld_name);
+							false, blobRelation->getName(), fld->fld_name);
 					}
 					else
 					{
 						SCL_check_access(tdbb, s_class, 0, {}, SCL_select, obj_relations,
-							false, blb_relation->rel_name);
+							false, blobRelation->getName());
 					}
 
 					s_class->scl_blb_access = SecurityClass::BA_SUCCESS;
@@ -4230,7 +4222,7 @@ void jrd_tra::checkBlob(thread_db* tdbb, const bid* blob_id, jrd_fld* fld, bool 
 						(fld ? Arg::Str("COLUMN") : Arg::Str("TABLE")) <<
 						(Arg::Str(fld ?
 							fld->fld_name.toQuotedString().c_str() :
-							blb_relation->rel_name.toQuotedString().c_str())));
+							blobRelation->getName().toQuotedString().c_str())));
 				}
 				else
 					tra_fetched_blobs.add(*blob_id);
@@ -4244,8 +4236,52 @@ void jrd_tra::checkBlob(thread_db* tdbb, const bid* blob_id, jrd_fld* fld, bool 
 				fb_assert(false);
 			}
 		}
+		else if (punt)
+		{
+			fatal_exception::raiseFmt("Invalid blob ID %x:%x",
+				blob_id->bid_quad.bid_quad_high, blob_id->bid_quad.bid_quad_low);
+		}
 	}
 }
+
+BulkInsert* jrd_tra::getBulkInsert(thread_db* tdbb, jrd_rel* relation, bool create)
+{
+	if (tra_bulkInsert)
+	{
+		if (tra_bulkInsert->getRelation() == relation)
+			return tra_bulkInsert;
+
+		// only one bulk insert at a time supported	currently
+		return nullptr;
+	}
+	else if (create)
+	{
+		tra_bulkInsert = FB_NEW_POOL(*tra_pool) BulkInsert(*tra_pool, tdbb, relation);
+	}
+
+	return tra_bulkInsert;
+}
+
+void jrd_tra::finiBulkInsert(thread_db* tdbb, bool /*commit*/)
+{
+	if (tra_bulkInsert)
+	{
+		// Currently, there is no way to explicitly undo bulk insert actions, while it
+		// might be implemented later if needed. Thus "commit" arg is not used for now.
+
+		tra_bulkInsert->flush(tdbb);
+
+		delete tra_bulkInsert;
+		tra_bulkInsert = nullptr;
+	}
+}
+
+void jrd_tra::finiBulkInsert(thread_db* tdbb, Request* request)
+{
+	if (tra_bulkInsert && tra_bulkInsert->getRequest() == request)
+		finiBulkInsert(tdbb, true);
+}
+
 
 /// class TraceSweepEvent
 
@@ -4291,15 +4327,15 @@ TraceSweepEvent::~TraceSweepEvent()
 }
 
 
-void TraceSweepEvent::beginSweepRelation(jrd_rel* relation)
+void TraceSweepEvent::beginSweepRelation(const jrd_rel* relation)
 {
 	if (!m_need_trace)
 		return;
 
-	if (relation && relation->rel_name.object.isEmpty())
+	if (relation && relation->getName().isEmpty())
 	{
 		// don't accumulate per-relation stats for metadata query below
-		MET_lookup_relation_id(m_tdbb, relation->rel_id, false);
+		MetadataCache::getVersioned<Cached::Relation>(m_tdbb, relation->getId(), CacheFlag::AUTOCREATE);
 	}
 
 	m_relation_clock = fb_utils::query_performance_counter();
@@ -4307,7 +4343,7 @@ void TraceSweepEvent::beginSweepRelation(jrd_rel* relation)
 }
 
 
-void TraceSweepEvent::endSweepRelation(jrd_rel* relation)
+void TraceSweepEvent::endSweepRelation()
 {
 	if (!m_need_trace)
 		return;
@@ -4379,8 +4415,8 @@ void TraceSweepEvent::report(ntrace_process_state_t state)
 		m_need_trace = false;
 }
 
-SecDbContext::SecDbContext(IAttachment* a, ITransaction* t) noexcept
-	: att(a), tra(t), savePoint(0)
+SecDbContext::SecDbContext(MemoryPool& p, IAttachment* a, ITransaction* t) noexcept
+	: att(a), tra(t), savePoint(p)
 { }
 
 SecDbContext::~SecDbContext()
@@ -4408,7 +4444,7 @@ SecDbContext* jrd_tra::setSecDbContext(IAttachment* att, ITransaction* tra)
 {
 	fb_assert(!tra_sec_db_context);
 
-	tra_sec_db_context = FB_NEW_POOL(*getDefaultMemoryPool()) SecDbContext(att, tra);
+	tra_sec_db_context = FB_NEW_POOL(*getDefaultMemoryPool()) SecDbContext(getPool(), att, tra);
 	return tra_sec_db_context;
 }
 
@@ -4417,3 +4453,37 @@ void jrd_tra::eraseSecDbContext() noexcept
 	delete tra_sec_db_context;
 	tra_sec_db_context = NULL;
 }
+
+void SecDbContext::setSavePoint()
+{
+	fb_assert(savePoint.isEmpty());
+	FbLocalStatus status;
+
+	savePoint.printf("ExecInSecurityDb%d", savePointNumber++);
+	att->execute(&status, tra, 0, ("SAVEPOINT " + savePoint).c_str(), SQL_DIALECT_V6, NULL, NULL, NULL, NULL);
+	check(&status);
+}
+
+void SecDbContext::releaseSavePoint()
+{
+	if (savePoint.hasData())
+	{
+		FbLocalStatus status;
+		att->execute(&status, tra, 0, ("RELEASE SAVEPOINT " + savePoint).c_str(),
+			SQL_DIALECT_V6, NULL, NULL, NULL, NULL);
+		check(&status);
+		rollbackSavePoint();
+	}
+}
+
+void SecDbContext::rollbackSavePoint() noexcept
+{
+	if (savePoint.hasData())
+	{
+		FbLocalStatus status;
+		att->execute(&status, tra, 0, ("ROLLBACK TO SAVEPOINT " + savePoint).c_str(),
+			SQL_DIALECT_V6, NULL, NULL, NULL, NULL);
+		savePoint.erase();
+	}
+}
+

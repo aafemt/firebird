@@ -36,6 +36,7 @@
 #include "../../common/isc_s_proto.h"
 #include "../../jrd/jrd.h"
 #include "../../jrd/tra.h"
+#include "../../jrd/met.h"
 #include "../../jrd/DataTypeUtil.h"
 #include "../../dsql/ExprNodes.h"
 #include "../../dsql/StmtNodes.h"
@@ -104,7 +105,7 @@ bool descToUTF8(const paramdsc* param, string& result)
 
 	try
 	{
-		if (!Jrd::DataTypeUtil::convertToUTF8(src, result, param->dsc_sub_type, status_exception::raise))
+		if (!Jrd::DataTypeUtil::convertToUTF8(src, result, CSetId(param->dsc_sub_type), status_exception::raise))
 			result = src;
 	}
 	catch (const Firebird::Exception&)
@@ -128,6 +129,26 @@ const char* StatementHolder::ensurePlan(bool explained)
 	}
 
 	return m_plan.c_str();
+}
+
+
+/// StatementHolder
+
+Firebird::string StatementHolder::getName() const
+{
+	if (m_statement)
+	{
+		if (m_statement->procedure)
+			return m_statement->procedure->getName().toQuotedString();
+
+		if (m_statement->function)
+			return m_statement->function->getName().toQuotedString();
+
+		if (m_statement->triggerName.hasData())
+			return m_statement->triggerName.toQuotedString();
+	}
+
+	return "";
 }
 
 
@@ -641,31 +662,29 @@ TraceRuntimeStats::TraceRuntimeStats(Attachment* attachment,
 		m_globalCounters[PerformanceInfo::MARKS] = (*baseline)[PageStatType::MARKS];
 		m_globalCounters[PerformanceInfo::WRITES] = (*baseline)[PageStatType::WRITES];
 
-		auto getTablespaceName = [&](unsigned id) -> Firebird::string
+		auto getTablespaceName = [&](MetaId id) -> Firebird::string
 		{
 			return ""; // TODO
 		};
 
 		m_pageCounters.reset(&baseline->getPageCounters(), getTablespaceName);
 
-		auto getTableName = [&](unsigned id) -> Firebird::string
+		auto getTableName = [&](MetaId id) -> Firebird::string
 		{
-			if (attachment->att_relations && id < attachment->att_relations->count())
-			{
-				if (const auto relation = (*attachment->att_relations)[id])
-					return relation->rel_name.toQuotedString();
-			}
+			auto* mdc = attachment->att_database->dbb_mdc;
+			if (const auto* relation = mdc->lookupRelationNoChecks(id))
+				return relation->getName().toQuotedString();
 
 			return "";
 		};
 
 		m_tableCounters.reset(&baseline->getTableCounters(), getTableName);
 
-		m_info.pin_count = m_tableCounters.getObjectCount();
-		m_legacyCounts.resize(m_info.pin_count);
+		m_legacyCounts.resize(m_tableCounters.getObjectCount());
 		m_info.pin_tables = m_legacyCounts.begin();
+		m_info.pin_count = m_legacyCounts.getCount();
 
-		for (unsigned i = 0; i < m_info.pin_count; i++)
+		for (FB_SIZE_T i = 0; i < m_info.pin_count; i++)
 		{
 			m_info.pin_tables[i].trc_relation_id = m_tableCounters.getObjectId(i);
 			m_info.pin_tables[i].trc_relation_name = m_tableCounters.getObjectName(i);

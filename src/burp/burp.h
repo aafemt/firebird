@@ -49,6 +49,7 @@
 #include "../common/status.h"
 #include "../common/sha.h"
 #include "../common/classes/ImplementHelper.h"
+#include "../jrd/intl.h"
 
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
@@ -123,7 +124,8 @@ enum rec_type {
 	rec_db_creator,			// Database creator
 	rec_publication,		// Publication
 	rec_pub_table,			// Publication table
-	rec_schema				// Schema
+	rec_schema,				// Schema
+	rec_constants			// Constants
 };
 
 
@@ -211,6 +213,17 @@ Version 11: FB4.0.
 
 Version 12: FB6.0.
 			Schemas.
+
+			Packaged constants.
+
+			Packaged tables:
+			RDB$RELATIONS.RDB$PACKAGE_NAME,
+			RDB$RELATIONS.RDB$PRIVATE_FLAG,
+			RDB$RELATION_FIELDSS.RDB$PACKAGE_NAME,
+			RDB$INDICES.RDB$PACKAGE_NAME and
+			RDB$INDEX_SEGMENTS.RDB$PACKAGE_NAME.
+
+			Custom aggregate function.
 */
 
 inline constexpr int ATT_BACKUP_FORMAT = 12;
@@ -290,6 +303,8 @@ enum att_type {
 	att_relation_sql_security_deprecated,	// can be removed later
 	att_relation_sql_security,
 	att_relation_schema_name,
+	att_relation_package_name,
+	att_relation_private_flag,
 
 	// Field attributes (used for both global and local fields)
 
@@ -458,6 +473,7 @@ enum att_type {
 	att_function_sql_security_deprecated,	// can be removed later
 	att_function_sql_security,
 	att_function_schema_name,
+	att_function_aggregate_flag,
 
 	// Function argument attributes
 
@@ -700,6 +716,17 @@ enum att_type {
 	att_schema_security_class,
 	att_schema_owner_name,
 	att_schema_description,
+
+	// Constants
+	att_constant_name = SERIES,
+	att_constant_package,
+	att_constant_field_source,
+	att_constant_field_source_schema,
+	att_constant_private_flag,
+	att_constant_blr,
+	att_constant_source,
+	att_constant_schema_name,
+	att_constant_description,
 };
 
 
@@ -767,8 +794,8 @@ struct burp_fld
 	SSHORT		fld_null_flag;
 	ISC_QUAD	fld_default_value;
 	ISC_QUAD	fld_default_source;
-	SSHORT		fld_character_set_id;
-	SSHORT		fld_collation_id;
+	CSetId		fld_character_set_id;
+	CollId		fld_collation_id;
 	RCRD_OFFSET	fld_sql;
 	RCRD_OFFSET	fld_null;
 };
@@ -790,7 +817,9 @@ struct burp_rel
 	burp_rel*	rel_next;
 	burp_fld*	rel_fields;
 	SSHORT		rel_flags;
+	bool		rel_system;		// set on restore; backup relies on BURP_alloc_zero (false = user table)
 	SSHORT		rel_id;
+	SSHORT		rel_type;		// RDB$RELATION_TYPE (rel_persistent, rel_view, ...); zero == persistent
 	Firebird::QualifiedMetaString rel_name;
 	GDS_NAME	rel_owner;		// relation owner, if not us
 	ULONG		rel_max_pp;		// max pointer page sequence number
@@ -1199,6 +1228,7 @@ public:
 	Firebird::IRequest*	handles_get_trigger_req_handle1;
 	Firebird::IRequest*	handles_get_trigger_req_handle2;
 	Firebird::IRequest*	handles_get_type_req_handle1;
+	Firebird::IRequest*	handles_get_constant_req_handle1;
 	Firebird::IRequest*	handles_get_user_privilege_req_handle1;
 	Firebird::IRequest*	handles_get_view_req_handle1;
 	Firebird::IRequest* handles_activateIndex_req_handle1;
@@ -1278,6 +1308,7 @@ public:
 
 	bool gbl_use_no_auto_undo = true;
 	bool gbl_use_auto_release_temp_blobid = true;
+	bool gbl_fast_path = false;
 };
 
 // CVC: This aux routine declared here to not force inclusion of burp.h with burp_proto.h
@@ -1385,13 +1416,13 @@ private:
 static inline UCHAR* BURP_alloc(ULONG size)
 {
 	BurpGlobals* tdgbl = BurpGlobals::getSpecific();
-	return (UCHAR*)(tdgbl->getPool().allocate(size ALLOC_ARGS));
+	return (UCHAR*)(tdgbl->getPool().allocate(size));
 }
 
 static inline UCHAR* BURP_alloc_zero(ULONG size)
 {
 	BurpGlobals* tdgbl = BurpGlobals::getSpecific();
-	return (UCHAR*)(tdgbl->getPool().calloc(size ALLOC_ARGS));
+	return (UCHAR*)(tdgbl->getPool().calloc(size));
 }
 
 static inline void BURP_free(void* block) noexcept

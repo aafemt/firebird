@@ -71,6 +71,8 @@ type
 	IExternalContext = class;
 	IExternalResultSet = class;
 	IExternalFunction = class;
+	IExternalAggregateInstance = class;
+	IExternalAggregateFunction = class;
 	IExternalProcedure = class;
 	IExternalTrigger = class;
 	IRoutineMetadata = class;
@@ -101,6 +103,7 @@ type
 	ITracePlugin = class;
 	ITraceFactory = class;
 	IUdrFunctionFactory = class;
+	IUdrAggregateFactory = class;
 	IUdrProcedureFactory = class;
 	IUdrTriggerFactory = class;
 	IUdrPlugin = class;
@@ -526,6 +529,12 @@ type
 	IExternalResultSet_fetchPtr = function(this: IExternalResultSet; status: IStatus): Boolean; cdecl;
 	IExternalFunction_getCharSetPtr = procedure(this: IExternalFunction; status: IStatus; context: IExternalContext; name: PAnsiChar; nameSize: Cardinal); cdecl;
 	IExternalFunction_executePtr = procedure(this: IExternalFunction; status: IStatus; context: IExternalContext; inMsg: Pointer; outMsg: Pointer); cdecl;
+	IExternalAggregateInstance_startPtr = procedure(this: IExternalAggregateInstance; status: IStatus; context: IExternalContext); cdecl;
+	IExternalAggregateInstance_accumulatePtr = procedure(this: IExternalAggregateInstance; status: IStatus; context: IExternalContext; inMsg: Pointer); cdecl;
+	IExternalAggregateInstance_groupPtr = procedure(this: IExternalAggregateInstance; status: IStatus; context: IExternalContext; outMsg: Pointer); cdecl;
+	IExternalAggregateInstance_finishPtr = procedure(this: IExternalAggregateInstance; status: IStatus; context: IExternalContext); cdecl;
+	IExternalAggregateFunction_getCharSetPtr = procedure(this: IExternalAggregateFunction; status: IStatus; context: IExternalContext; name: PAnsiChar; nameSize: Cardinal); cdecl;
+	IExternalAggregateFunction_newInstancePtr = function(this: IExternalAggregateFunction; status: IStatus; context: IExternalContext): IExternalAggregateInstance; cdecl;
 	IExternalProcedure_getCharSetPtr = procedure(this: IExternalProcedure; status: IStatus; context: IExternalContext; name: PAnsiChar; nameSize: Cardinal); cdecl;
 	IExternalProcedure_openPtr = function(this: IExternalProcedure; status: IStatus; context: IExternalContext; inMsg: Pointer; outMsg: Pointer): IExternalResultSet; cdecl;
 	IExternalTrigger_getCharSetPtr = procedure(this: IExternalTrigger; status: IStatus; context: IExternalContext; name: PAnsiChar; nameSize: Cardinal); cdecl;
@@ -546,6 +555,7 @@ type
 	IExternalEngine_makeFunctionPtr = function(this: IExternalEngine; status: IStatus; context: IExternalContext; metadata: IRoutineMetadata; inBuilder: IMetadataBuilder; outBuilder: IMetadataBuilder): IExternalFunction; cdecl;
 	IExternalEngine_makeProcedurePtr = function(this: IExternalEngine; status: IStatus; context: IExternalContext; metadata: IRoutineMetadata; inBuilder: IMetadataBuilder; outBuilder: IMetadataBuilder): IExternalProcedure; cdecl;
 	IExternalEngine_makeTriggerPtr = function(this: IExternalEngine; status: IStatus; context: IExternalContext; metadata: IRoutineMetadata; fieldsBuilder: IMetadataBuilder): IExternalTrigger; cdecl;
+	IExternalEngine_makeAggregateFunctionPtr = function(this: IExternalEngine; status: IStatus; context: IExternalContext; metadata: IRoutineMetadata; inBuilder: IMetadataBuilder; outBuilder: IMetadataBuilder): IExternalAggregateFunction; cdecl;
 	ITimer_handlerPtr = procedure(this: ITimer); cdecl;
 	ITimerControl_startPtr = procedure(this: ITimerControl; status: IStatus; timer: ITimer; microSeconds: QWord); cdecl;
 	ITimerControl_stopPtr = procedure(this: ITimerControl; status: IStatus; timer: ITimer); cdecl;
@@ -572,8 +582,8 @@ type
 	IUtil_getInt128Ptr = function(this: IUtil; status: IStatus): IInt128; cdecl;
 	IUtil_decodeTimeTzExPtr = procedure(this: IUtil; status: IStatus; timeTz: ISC_TIME_TZ_EXPtr; hours: CardinalPtr; minutes: CardinalPtr; seconds: CardinalPtr; fractions: CardinalPtr; timeZoneBufferLength: Cardinal; timeZoneBuffer: PAnsiChar); cdecl;
 	IUtil_decodeTimeStampTzExPtr = procedure(this: IUtil; status: IStatus; timeStampTz: ISC_TIMESTAMP_TZ_EXPtr; year: CardinalPtr; month: CardinalPtr; day: CardinalPtr; hours: CardinalPtr; minutes: CardinalPtr; seconds: CardinalPtr; fractions: CardinalPtr; timeZoneBufferLength: Cardinal; timeZoneBuffer: PAnsiChar); cdecl;
-	IUtil_executeCreateDatabase2Ptr = function(this: IUtil; status: IStatus; stmtLength: Cardinal; creatDBstatement: PAnsiChar; dialect: Cardinal; dpbLength: Cardinal; dpb: BytePtr; stmtIsCreateDb: BooleanPtr): IAttachment; cdecl;
 	IUtil_convertPtr = procedure(this: IUtil; status: IStatus; sourceType: Cardinal; sourceScale: Cardinal; sourceLength: Cardinal; source: Pointer; targetType: Cardinal; targetScale: Cardinal; targetLength: Cardinal; target: Pointer); cdecl;
+	IUtil_executeCreateDatabase2Ptr = function(this: IUtil; status: IStatus; stmtLength: Cardinal; creatDBstatement: PAnsiChar; dialect: Cardinal; dpbLength: Cardinal; dpb: BytePtr; stmtIsCreateDb: BooleanPtr): IAttachment; cdecl;
 	IOffsetsCallback_setOffsetPtr = procedure(this: IOffsetsCallback; status: IStatus; index: Cardinal; offset: Cardinal; nullOffset: Cardinal); cdecl;
 	IXpbBuilder_clearPtr = procedure(this: IXpbBuilder; status: IStatus); cdecl;
 	IXpbBuilder_removeCurrentPtr = procedure(this: IXpbBuilder; status: IStatus); cdecl;
@@ -619,15 +629,16 @@ type
 	ITraceParams_getTextUTF8Ptr = function(this: ITraceParams; status: IStatus; idx: Cardinal): PAnsiChar; cdecl;
 	ITraceStatement_getStmtIDPtr = function(this: ITraceStatement): Int64; cdecl;
 	ITraceStatement_getPerfPtr = function(this: ITraceStatement): PerformanceInfoPtr; cdecl;
-	ITraceStatement_getPerfStatsPtr = function(this: ITraceStatement): IPerformanceStats; cdecl;
 	ITraceSQLStatement_getTextPtr = function(this: ITraceSQLStatement): PAnsiChar; cdecl;
 	ITraceSQLStatement_getPlanPtr = function(this: ITraceSQLStatement): PAnsiChar; cdecl;
 	ITraceSQLStatement_getInputsPtr = function(this: ITraceSQLStatement): ITraceParams; cdecl;
 	ITraceSQLStatement_getTextUTF8Ptr = function(this: ITraceSQLStatement): PAnsiChar; cdecl;
 	ITraceSQLStatement_getExplainedPlanPtr = function(this: ITraceSQLStatement): PAnsiChar; cdecl;
+	ITraceSQLStatement_getPerfStatsPtr = function(this: ITraceSQLStatement): IPerformanceStats; cdecl;
 	ITraceBLRStatement_getDataPtr = function(this: ITraceBLRStatement): BytePtr; cdecl;
 	ITraceBLRStatement_getDataLengthPtr = function(this: ITraceBLRStatement): Cardinal; cdecl;
 	ITraceBLRStatement_getTextPtr = function(this: ITraceBLRStatement): PAnsiChar; cdecl;
+	ITraceBLRStatement_getPerfStatsPtr = function(this: ITraceBLRStatement): IPerformanceStats; cdecl;
 	ITraceDYNRequest_getDataPtr = function(this: ITraceDYNRequest): BytePtr; cdecl;
 	ITraceDYNRequest_getDataLengthPtr = function(this: ITraceDYNRequest): Cardinal; cdecl;
 	ITraceDYNRequest_getTextPtr = function(this: ITraceDYNRequest): PAnsiChar; cdecl;
@@ -680,6 +691,7 @@ type
 	ITraceInitInfo_getDatabaseNamePtr = function(this: ITraceInitInfo): PAnsiChar; cdecl;
 	ITraceInitInfo_getConnectionPtr = function(this: ITraceInitInfo): ITraceDatabaseConnection; cdecl;
 	ITraceInitInfo_getLogWriterPtr = function(this: ITraceInitInfo): ITraceLogWriter; cdecl;
+	ITraceInitInfo_getTraceSessionFlagsPtr = function(this: ITraceInitInfo): Cardinal; cdecl;
 	ITracePlugin_trace_get_errorPtr = function(this: ITracePlugin): PAnsiChar; cdecl;
 	ITracePlugin_trace_attachPtr = function(this: ITracePlugin; connection: ITraceDatabaseConnection; create_db: Boolean; att_result: Cardinal): Boolean; cdecl;
 	ITracePlugin_trace_detachPtr = function(this: ITracePlugin; connection: ITraceDatabaseConnection; drop_db: Boolean): Boolean; cdecl;
@@ -709,6 +721,8 @@ type
 	ITraceFactory_trace_createPtr = function(this: ITraceFactory; status: IStatus; init_info: ITraceInitInfo): ITracePlugin; cdecl;
 	IUdrFunctionFactory_setupPtr = procedure(this: IUdrFunctionFactory; status: IStatus; context: IExternalContext; metadata: IRoutineMetadata; inBuilder: IMetadataBuilder; outBuilder: IMetadataBuilder); cdecl;
 	IUdrFunctionFactory_newItemPtr = function(this: IUdrFunctionFactory; status: IStatus; context: IExternalContext; metadata: IRoutineMetadata): IExternalFunction; cdecl;
+	IUdrAggregateFactory_setupPtr = procedure(this: IUdrAggregateFactory; status: IStatus; context: IExternalContext; metadata: IRoutineMetadata; inBuilder: IMetadataBuilder; outBuilder: IMetadataBuilder); cdecl;
+	IUdrAggregateFactory_newItemPtr = function(this: IUdrAggregateFactory; status: IStatus; context: IExternalContext; metadata: IRoutineMetadata): IExternalAggregateFunction; cdecl;
 	IUdrProcedureFactory_setupPtr = procedure(this: IUdrProcedureFactory; status: IStatus; context: IExternalContext; metadata: IRoutineMetadata; inBuilder: IMetadataBuilder; outBuilder: IMetadataBuilder); cdecl;
 	IUdrProcedureFactory_newItemPtr = function(this: IUdrProcedureFactory; status: IStatus; context: IExternalContext; metadata: IRoutineMetadata): IExternalProcedure; cdecl;
 	IUdrTriggerFactory_setupPtr = procedure(this: IUdrTriggerFactory; status: IStatus; context: IExternalContext; metadata: IRoutineMetadata; fieldsBuilder: IMetadataBuilder); cdecl;
@@ -717,6 +731,7 @@ type
 	IUdrPlugin_registerFunctionPtr = procedure(this: IUdrPlugin; status: IStatus; name: PAnsiChar; factory: IUdrFunctionFactory); cdecl;
 	IUdrPlugin_registerProcedurePtr = procedure(this: IUdrPlugin; status: IStatus; name: PAnsiChar; factory: IUdrProcedureFactory); cdecl;
 	IUdrPlugin_registerTriggerPtr = procedure(this: IUdrPlugin; status: IStatus; name: PAnsiChar; factory: IUdrTriggerFactory); cdecl;
+	IUdrPlugin_registerAggregateFunctionPtr = procedure(this: IUdrPlugin; status: IStatus; name: PAnsiChar; factory: IUdrAggregateFactory); cdecl;
 	IDecFloat16_toBcdPtr = procedure(this: IDecFloat16; from: FB_DEC16Ptr; sign: IntegerPtr; bcd: BytePtr; exp: IntegerPtr); cdecl;
 	IDecFloat16_toStringPtr = procedure(this: IDecFloat16; status: IStatus; from: FB_DEC16Ptr; bufferLength: Cardinal; buffer: PAnsiChar); cdecl;
 	IDecFloat16_fromBcdPtr = procedure(this: IDecFloat16; sign: Integer; bcd: BytePtr; exp: Integer; to_: FB_DEC16Ptr); cdecl;
@@ -2621,6 +2636,52 @@ type
 		procedure execute(status: IStatus; context: IExternalContext; inMsg: Pointer; outMsg: Pointer); virtual; abstract;
 	end;
 
+	ExternalAggregateInstanceVTable = class(DisposableVTable)
+		start: IExternalAggregateInstance_startPtr;
+		accumulate: IExternalAggregateInstance_accumulatePtr;
+		group: IExternalAggregateInstance_groupPtr;
+		finish: IExternalAggregateInstance_finishPtr;
+	end;
+
+	IExternalAggregateInstance = class(IDisposable)
+		const VERSION = 3;
+
+		procedure start(status: IStatus; context: IExternalContext);
+		procedure accumulate(status: IStatus; context: IExternalContext; inMsg: Pointer);
+		procedure group(status: IStatus; context: IExternalContext; outMsg: Pointer);
+		procedure finish(status: IStatus; context: IExternalContext);
+	end;
+
+	IExternalAggregateInstanceImpl = class(IExternalAggregateInstance)
+		constructor create;
+
+		procedure dispose(); virtual; abstract;
+		procedure start(status: IStatus; context: IExternalContext); virtual; abstract;
+		procedure accumulate(status: IStatus; context: IExternalContext; inMsg: Pointer); virtual; abstract;
+		procedure group(status: IStatus; context: IExternalContext; outMsg: Pointer); virtual; abstract;
+		procedure finish(status: IStatus; context: IExternalContext); virtual; abstract;
+	end;
+
+	ExternalAggregateFunctionVTable = class(DisposableVTable)
+		getCharSet: IExternalAggregateFunction_getCharSetPtr;
+		newInstance: IExternalAggregateFunction_newInstancePtr;
+	end;
+
+	IExternalAggregateFunction = class(IDisposable)
+		const VERSION = 3;
+
+		procedure getCharSet(status: IStatus; context: IExternalContext; name: PAnsiChar; nameSize: Cardinal);
+		function newInstance(status: IStatus; context: IExternalContext): IExternalAggregateInstance;
+	end;
+
+	IExternalAggregateFunctionImpl = class(IExternalAggregateFunction)
+		constructor create;
+
+		procedure dispose(); virtual; abstract;
+		procedure getCharSet(status: IStatus; context: IExternalContext; name: PAnsiChar; nameSize: Cardinal); virtual; abstract;
+		function newInstance(status: IStatus; context: IExternalContext): IExternalAggregateInstance; virtual; abstract;
+	end;
+
 	ExternalProcedureVTable = class(DisposableVTable)
 		getCharSet: IExternalProcedure_getCharSetPtr;
 		open: IExternalProcedure_openPtr;
@@ -2723,10 +2784,11 @@ type
 		makeFunction: IExternalEngine_makeFunctionPtr;
 		makeProcedure: IExternalEngine_makeProcedurePtr;
 		makeTrigger: IExternalEngine_makeTriggerPtr;
+		makeAggregateFunction: IExternalEngine_makeAggregateFunctionPtr;
 	end;
 
 	IExternalEngine = class(IPluginBase)
-		const VERSION = 4;
+		const VERSION = 5;
 
 		procedure open(status: IStatus; context: IExternalContext; charSet: PAnsiChar; charSetSize: Cardinal);
 		procedure openAttachment(status: IStatus; context: IExternalContext);
@@ -2734,6 +2796,7 @@ type
 		function makeFunction(status: IStatus; context: IExternalContext; metadata: IRoutineMetadata; inBuilder: IMetadataBuilder; outBuilder: IMetadataBuilder): IExternalFunction;
 		function makeProcedure(status: IStatus; context: IExternalContext; metadata: IRoutineMetadata; inBuilder: IMetadataBuilder; outBuilder: IMetadataBuilder): IExternalProcedure;
 		function makeTrigger(status: IStatus; context: IExternalContext; metadata: IRoutineMetadata; fieldsBuilder: IMetadataBuilder): IExternalTrigger;
+		function makeAggregateFunction(status: IStatus; context: IExternalContext; metadata: IRoutineMetadata; inBuilder: IMetadataBuilder; outBuilder: IMetadataBuilder): IExternalAggregateFunction;
 	end;
 
 	IExternalEngineImpl = class(IExternalEngine)
@@ -2749,6 +2812,7 @@ type
 		function makeFunction(status: IStatus; context: IExternalContext; metadata: IRoutineMetadata; inBuilder: IMetadataBuilder; outBuilder: IMetadataBuilder): IExternalFunction; virtual; abstract;
 		function makeProcedure(status: IStatus; context: IExternalContext; metadata: IRoutineMetadata; inBuilder: IMetadataBuilder; outBuilder: IMetadataBuilder): IExternalProcedure; virtual; abstract;
 		function makeTrigger(status: IStatus; context: IExternalContext; metadata: IRoutineMetadata; fieldsBuilder: IMetadataBuilder): IExternalTrigger; virtual; abstract;
+		function makeAggregateFunction(status: IStatus; context: IExternalContext; metadata: IRoutineMetadata; inBuilder: IMetadataBuilder; outBuilder: IMetadataBuilder): IExternalAggregateFunction; virtual; abstract;
 	end;
 
 	TimerVTable = class(ReferenceCountedVTable)
@@ -2827,8 +2891,8 @@ type
 		getInt128: IUtil_getInt128Ptr;
 		decodeTimeTzEx: IUtil_decodeTimeTzExPtr;
 		decodeTimeStampTzEx: IUtil_decodeTimeStampTzExPtr;
-		executeCreateDatabase2: IUtil_executeCreateDatabase2Ptr;
 		convert: IUtil_convertPtr;
+		executeCreateDatabase2: IUtil_executeCreateDatabase2Ptr;
 	end;
 
 	IUtil = class(IVersioned)
@@ -2856,8 +2920,8 @@ type
 		function getInt128(status: IStatus): IInt128;
 		procedure decodeTimeTzEx(status: IStatus; timeTz: ISC_TIME_TZ_EXPtr; hours: CardinalPtr; minutes: CardinalPtr; seconds: CardinalPtr; fractions: CardinalPtr; timeZoneBufferLength: Cardinal; timeZoneBuffer: PAnsiChar);
 		procedure decodeTimeStampTzEx(status: IStatus; timeStampTz: ISC_TIMESTAMP_TZ_EXPtr; year: CardinalPtr; month: CardinalPtr; day: CardinalPtr; hours: CardinalPtr; minutes: CardinalPtr; seconds: CardinalPtr; fractions: CardinalPtr; timeZoneBufferLength: Cardinal; timeZoneBuffer: PAnsiChar);
-		function executeCreateDatabase2(status: IStatus; stmtLength: Cardinal; creatDBstatement: PAnsiChar; dialect: Cardinal; dpbLength: Cardinal; dpb: BytePtr; stmtIsCreateDb: BooleanPtr): IAttachment;
 		procedure convert(status: IStatus; sourceType: Cardinal; sourceScale: Cardinal; sourceLength: Cardinal; source: Pointer; targetType: Cardinal; targetScale: Cardinal; targetLength: Cardinal; target: Pointer);
+		function executeCreateDatabase2(status: IStatus; stmtLength: Cardinal; creatDBstatement: PAnsiChar; dialect: Cardinal; dpbLength: Cardinal; dpb: BytePtr; stmtIsCreateDb: BooleanPtr): IAttachment;
 	end;
 
 	IUtilImpl = class(IUtil)
@@ -2885,8 +2949,8 @@ type
 		function getInt128(status: IStatus): IInt128; virtual; abstract;
 		procedure decodeTimeTzEx(status: IStatus; timeTz: ISC_TIME_TZ_EXPtr; hours: CardinalPtr; minutes: CardinalPtr; seconds: CardinalPtr; fractions: CardinalPtr; timeZoneBufferLength: Cardinal; timeZoneBuffer: PAnsiChar); virtual; abstract;
 		procedure decodeTimeStampTzEx(status: IStatus; timeStampTz: ISC_TIMESTAMP_TZ_EXPtr; year: CardinalPtr; month: CardinalPtr; day: CardinalPtr; hours: CardinalPtr; minutes: CardinalPtr; seconds: CardinalPtr; fractions: CardinalPtr; timeZoneBufferLength: Cardinal; timeZoneBuffer: PAnsiChar); virtual; abstract;
-		function executeCreateDatabase2(status: IStatus; stmtLength: Cardinal; creatDBstatement: PAnsiChar; dialect: Cardinal; dpbLength: Cardinal; dpb: BytePtr; stmtIsCreateDb: BooleanPtr): IAttachment; virtual; abstract;
 		procedure convert(status: IStatus; sourceType: Cardinal; sourceScale: Cardinal; sourceLength: Cardinal; source: Pointer; targetType: Cardinal; targetScale: Cardinal; targetLength: Cardinal; target: Pointer); virtual; abstract;
+		function executeCreateDatabase2(status: IStatus; stmtLength: Cardinal; creatDBstatement: PAnsiChar; dialect: Cardinal; dpbLength: Cardinal; dpb: BytePtr; stmtIsCreateDb: BooleanPtr): IAttachment; virtual; abstract;
 	end;
 
 	OffsetsCallbackVTable = class(VersionedVTable)
@@ -3127,15 +3191,13 @@ type
 	TraceStatementVTable = class(VersionedVTable)
 		getStmtID: ITraceStatement_getStmtIDPtr;
 		getPerf: ITraceStatement_getPerfPtr;
-		getPerfStats: ITraceStatement_getPerfStatsPtr;
 	end;
 
 	ITraceStatement = class(IVersioned)
-		const VERSION = 3;
+		const VERSION = 2;
 
 		function getStmtID(): Int64;
 		function getPerf(): PerformanceInfoPtr;
-		function getPerfStats(): IPerformanceStats;
 	end;
 
 	ITraceStatementImpl = class(ITraceStatement)
@@ -3143,7 +3205,6 @@ type
 
 		function getStmtID(): Int64; virtual; abstract;
 		function getPerf(): PerformanceInfoPtr; virtual; abstract;
-		function getPerfStats(): IPerformanceStats; virtual; abstract;
 	end;
 
 	TraceSQLStatementVTable = class(TraceStatementVTable)
@@ -3152,6 +3213,7 @@ type
 		getInputs: ITraceSQLStatement_getInputsPtr;
 		getTextUTF8: ITraceSQLStatement_getTextUTF8Ptr;
 		getExplainedPlan: ITraceSQLStatement_getExplainedPlanPtr;
+		getPerfStats: ITraceSQLStatement_getPerfStatsPtr;
 	end;
 
 	ITraceSQLStatement = class(ITraceStatement)
@@ -3162,6 +3224,7 @@ type
 		function getInputs(): ITraceParams;
 		function getTextUTF8(): PAnsiChar;
 		function getExplainedPlan(): PAnsiChar;
+		function getPerfStats(): IPerformanceStats;
 	end;
 
 	ITraceSQLStatementImpl = class(ITraceSQLStatement)
@@ -3169,18 +3232,19 @@ type
 
 		function getStmtID(): Int64; virtual; abstract;
 		function getPerf(): PerformanceInfoPtr; virtual; abstract;
-		function getPerfStats(): IPerformanceStats; virtual; abstract;
 		function getText(): PAnsiChar; virtual; abstract;
 		function getPlan(): PAnsiChar; virtual; abstract;
 		function getInputs(): ITraceParams; virtual; abstract;
 		function getTextUTF8(): PAnsiChar; virtual; abstract;
 		function getExplainedPlan(): PAnsiChar; virtual; abstract;
+		function getPerfStats(): IPerformanceStats; virtual; abstract;
 	end;
 
 	TraceBLRStatementVTable = class(TraceStatementVTable)
 		getData: ITraceBLRStatement_getDataPtr;
 		getDataLength: ITraceBLRStatement_getDataLengthPtr;
 		getText: ITraceBLRStatement_getTextPtr;
+		getPerfStats: ITraceBLRStatement_getPerfStatsPtr;
 	end;
 
 	ITraceBLRStatement = class(ITraceStatement)
@@ -3189,6 +3253,7 @@ type
 		function getData(): BytePtr;
 		function getDataLength(): Cardinal;
 		function getText(): PAnsiChar;
+		function getPerfStats(): IPerformanceStats;
 	end;
 
 	ITraceBLRStatementImpl = class(ITraceBLRStatement)
@@ -3196,10 +3261,10 @@ type
 
 		function getStmtID(): Int64; virtual; abstract;
 		function getPerf(): PerformanceInfoPtr; virtual; abstract;
-		function getPerfStats(): IPerformanceStats; virtual; abstract;
 		function getData(): BytePtr; virtual; abstract;
 		function getDataLength(): Cardinal; virtual; abstract;
 		function getText(): PAnsiChar; virtual; abstract;
+		function getPerfStats(): IPerformanceStats; virtual; abstract;
 	end;
 
 	TraceDYNRequestVTable = class(VersionedVTable)
@@ -3476,10 +3541,16 @@ type
 		getDatabaseName: ITraceInitInfo_getDatabaseNamePtr;
 		getConnection: ITraceInitInfo_getConnectionPtr;
 		getLogWriter: ITraceInitInfo_getLogWriterPtr;
+		getTraceSessionFlags: ITraceInitInfo_getTraceSessionFlagsPtr;
 	end;
 
 	ITraceInitInfo = class(IVersioned)
 		const VERSION = 2;
+		const SESSION_FLAG_ADMIN = Cardinal($1);
+		const SESSION_FLAG_ACTIVE = Cardinal($2);
+		const SESSION_FLAG_SYSTEM = Cardinal($4);
+		const SESSION_FLAG_LOG_FULL = Cardinal($8);
+		const SESSION_FLAG_LOCAL = Cardinal($10);
 
 		function getConfigText(): PAnsiChar;
 		function getTraceSessionID(): Integer;
@@ -3488,6 +3559,7 @@ type
 		function getDatabaseName(): PAnsiChar;
 		function getConnection(): ITraceDatabaseConnection;
 		function getLogWriter(): ITraceLogWriter;
+		function getTraceSessionFlags(): Cardinal;
 	end;
 
 	ITraceInitInfoImpl = class(ITraceInitInfo)
@@ -3500,6 +3572,7 @@ type
 		function getDatabaseName(): PAnsiChar; virtual; abstract;
 		function getConnection(): ITraceDatabaseConnection; virtual; abstract;
 		function getLogWriter(): ITraceLogWriter; virtual; abstract;
+		function getTraceSessionFlags(): Cardinal; virtual; abstract;
 	end;
 
 	TracePluginVTable = class(ReferenceCountedVTable)
@@ -3666,6 +3739,26 @@ type
 		function newItem(status: IStatus; context: IExternalContext; metadata: IRoutineMetadata): IExternalFunction; virtual; abstract;
 	end;
 
+	UdrAggregateFactoryVTable = class(DisposableVTable)
+		setup: IUdrAggregateFactory_setupPtr;
+		newItem: IUdrAggregateFactory_newItemPtr;
+	end;
+
+	IUdrAggregateFactory = class(IDisposable)
+		const VERSION = 3;
+
+		procedure setup(status: IStatus; context: IExternalContext; metadata: IRoutineMetadata; inBuilder: IMetadataBuilder; outBuilder: IMetadataBuilder);
+		function newItem(status: IStatus; context: IExternalContext; metadata: IRoutineMetadata): IExternalAggregateFunction;
+	end;
+
+	IUdrAggregateFactoryImpl = class(IUdrAggregateFactory)
+		constructor create;
+
+		procedure dispose(); virtual; abstract;
+		procedure setup(status: IStatus; context: IExternalContext; metadata: IRoutineMetadata; inBuilder: IMetadataBuilder; outBuilder: IMetadataBuilder); virtual; abstract;
+		function newItem(status: IStatus; context: IExternalContext; metadata: IRoutineMetadata): IExternalAggregateFunction; virtual; abstract;
+	end;
+
 	UdrProcedureFactoryVTable = class(DisposableVTable)
 		setup: IUdrProcedureFactory_setupPtr;
 		newItem: IUdrProcedureFactory_newItemPtr;
@@ -3711,15 +3804,17 @@ type
 		registerFunction: IUdrPlugin_registerFunctionPtr;
 		registerProcedure: IUdrPlugin_registerProcedurePtr;
 		registerTrigger: IUdrPlugin_registerTriggerPtr;
+		registerAggregateFunction: IUdrPlugin_registerAggregateFunctionPtr;
 	end;
 
 	IUdrPlugin = class(IVersioned)
-		const VERSION = 2;
+		const VERSION = 3;
 
 		function getMaster(): IMaster;
 		procedure registerFunction(status: IStatus; name: PAnsiChar; factory: IUdrFunctionFactory);
 		procedure registerProcedure(status: IStatus; name: PAnsiChar; factory: IUdrProcedureFactory);
 		procedure registerTrigger(status: IStatus; name: PAnsiChar; factory: IUdrTriggerFactory);
+		procedure registerAggregateFunction(status: IStatus; name: PAnsiChar; factory: IUdrAggregateFactory);
 	end;
 
 	IUdrPluginImpl = class(IUdrPlugin)
@@ -3729,6 +3824,7 @@ type
 		procedure registerFunction(status: IStatus; name: PAnsiChar; factory: IUdrFunctionFactory); virtual; abstract;
 		procedure registerProcedure(status: IStatus; name: PAnsiChar; factory: IUdrProcedureFactory); virtual; abstract;
 		procedure registerTrigger(status: IStatus; name: PAnsiChar; factory: IUdrTriggerFactory); virtual; abstract;
+		procedure registerAggregateFunction(status: IStatus; name: PAnsiChar; factory: IUdrAggregateFactory); virtual; abstract;
 	end;
 
 	DecFloat16VTable = class(VersionedVTable)
@@ -4417,6 +4513,7 @@ const
 	isc_spb_bkp_no_triggers = $8000;
 	isc_spb_bkp_zip = $010000;
 	isc_spb_bkp_direct_io = $020000;
+	isc_spb_bkp_fast_path = $040000;
 	isc_spb_prp_page_buffers = byte(5);
 	isc_spb_prp_sweep_interval = byte(6);
 	isc_spb_prp_shutdown_db = byte(7);
@@ -5956,6 +6053,29 @@ const
 	 isc_no_user_att_while_restore = 335545318;
 	 isc_genseq_stepmustbe_nonzero = 335545319;
 	 isc_argmustbe_exact_function = 335545320;
+	 isc_sysf_argmustbe_range_inc0_1 = 335545321;
+	 isc_argmustbe_numeric_function = 335545322;
+	 isc_percetile_only_one_sort_item = 335545323;
+	 isc_argmustbe_const_within_group = 335545324;
+	 isc_update_overwrite = 335545325;
+	 isc_pman_plugin_dirname = 335545326;
+	 isc_private_constant = 335545327;
+	 isc_package_alias_help = 335545328;
+	 isc_bad_constant_blr = 335545329;
+	 isc_bad_constant_desc = 335545330;
+	 isc_bad_constant_name = 335545331;
+	 isc_bad_constant_type = 335545332;
+	 isc_not_defined_constant = 335545333;
+	 isc_const_name = 335545334;
+	 isc_private_table = 335545335;
+	 isc_temp_space_invalid_pos = 335545336;
+	 isc_dsql_agg_non_agg_context = 335545337;
+	 isc_dsql_agg_param_not_accum = 335545338;
+	 isc_dsql_agg_exit_group = 335545339;
+	 isc_dsql_agg_return = 335545340;
+	 isc_hypfun_args_non_equal_sort_item = 335545341;
+	 isc_old_format = 335545342;
+	 isc_user_savepoint = 335545343;
 	 isc_gfix_db_name = 335740929;
 	 isc_gfix_invalid_sw = 335740930;
 	 isc_gfix_incmp_sw = 335740932;
@@ -6023,6 +6143,8 @@ const
 	 isc_dsql_wrong_param_num = 336003111;
 	 isc_dsql_invalid_drop_ss_clause = 336003112;
 	 isc_upd_ins_cannot_default = 336003113;
+	 isc_dsql_ltt_invalid_reference = 336003114;
+	 isc_dsql_using_statement_must_contain_clause = 336003115;
 	 isc_dyn_filter_not_found = 336068645;
 	 isc_dyn_func_not_found = 336068649;
 	 isc_dyn_index_not_found = 336068656;
@@ -6119,6 +6241,8 @@ const
 	 isc_dyn_cannot_mod_obj_sys_schema = 336068927;
 	 isc_dyn_cannot_create_reserved_schema = 336068928;
 	 isc_dyn_cannot_infer_schema = 336068929;
+	 isc_dyn_column_name_exists = 336068931;
+	 isc_dyn_function_mismatch = 336068935;
 	 isc_gbak_unknown_switch = 336330753;
 	 isc_gbak_page_size_missing = 336330754;
 	 isc_gbak_page_size_toobig = 336330755;
@@ -6217,6 +6341,14 @@ const
 	 isc_gbak_invalid_data = 336331094;
 	 isc_gbak_inv_bkup_ver2 = 336331096;
 	 isc_gbak_db_format_too_old2 = 336331100;
+	 isc_gbak_writing_constants = 336331175;
+	 isc_gbak_writing_constant = 336331176;
+	 isc_gbak_constant = 336331177;
+	 isc_gbak_restoring_constant = 336331178;
+	 isc_gbak_inv_column = 336331180;
+	 isc_gbak_inv_record_length = 336331181;
+	 isc_gbak_fast_path_needs_service = 336331182;
+	 isc_gbak_fast_path_no_snapshot = 336331184;
 	 isc_dsql_too_old_ods = 336397205;
 	 isc_dsql_table_not_found = 336397206;
 	 isc_dsql_view_not_found = 336397207;
@@ -6353,6 +6485,9 @@ const
 	 isc_dsql_recreate_schema_failed = 336397338;
 	 isc_dsql_alter_schema_failed = 336397339;
 	 isc_dsql_create_alter_schema_failed = 336397340;
+	 isc_dsql_create_const_failed = 336397341;
+	 isc_dsql_alter_const_failed = 336397342;
+	 isc_dsql_create_alter_const_failed = 336397343;
 	 isc_gsec_cant_open_db = 336723983;
 	 isc_gsec_switches_error = 336723984;
 	 isc_gsec_no_op_spec = 336723985;
@@ -8636,6 +8771,42 @@ begin
 	FbException.checkException(status);
 end;
 
+procedure IExternalAggregateInstance.start(status: IStatus; context: IExternalContext);
+begin
+	ExternalAggregateInstanceVTable(vTable).start(Self, status, context);
+	FbException.checkException(status);
+end;
+
+procedure IExternalAggregateInstance.accumulate(status: IStatus; context: IExternalContext; inMsg: Pointer);
+begin
+	ExternalAggregateInstanceVTable(vTable).accumulate(Self, status, context, inMsg);
+	FbException.checkException(status);
+end;
+
+procedure IExternalAggregateInstance.group(status: IStatus; context: IExternalContext; outMsg: Pointer);
+begin
+	ExternalAggregateInstanceVTable(vTable).group(Self, status, context, outMsg);
+	FbException.checkException(status);
+end;
+
+procedure IExternalAggregateInstance.finish(status: IStatus; context: IExternalContext);
+begin
+	ExternalAggregateInstanceVTable(vTable).finish(Self, status, context);
+	FbException.checkException(status);
+end;
+
+procedure IExternalAggregateFunction.getCharSet(status: IStatus; context: IExternalContext; name: PAnsiChar; nameSize: Cardinal);
+begin
+	ExternalAggregateFunctionVTable(vTable).getCharSet(Self, status, context, name, nameSize);
+	FbException.checkException(status);
+end;
+
+function IExternalAggregateFunction.newInstance(status: IStatus; context: IExternalContext): IExternalAggregateInstance;
+begin
+	Result := ExternalAggregateFunctionVTable(vTable).newInstance(Self, status, context);
+	FbException.checkException(status);
+end;
+
 procedure IExternalProcedure.getCharSet(status: IStatus; context: IExternalContext; name: PAnsiChar; nameSize: Cardinal);
 begin
 	ExternalProcedureVTable(vTable).getCharSet(Self, status, context, name, nameSize);
@@ -8759,6 +8930,18 @@ end;
 function IExternalEngine.makeTrigger(status: IStatus; context: IExternalContext; metadata: IRoutineMetadata; fieldsBuilder: IMetadataBuilder): IExternalTrigger;
 begin
 	Result := ExternalEngineVTable(vTable).makeTrigger(Self, status, context, metadata, fieldsBuilder);
+	FbException.checkException(status);
+end;
+
+function IExternalEngine.makeAggregateFunction(status: IStatus; context: IExternalContext; metadata: IRoutineMetadata; inBuilder: IMetadataBuilder; outBuilder: IMetadataBuilder): IExternalAggregateFunction;
+begin
+	if (vTable.version < 5) then begin
+		FbException.setVersionError(status, 'IExternalEngine', vTable.version, 5);
+		Result := nil;
+	end
+	else begin
+		Result := ExternalEngineVTable(vTable).makeAggregateFunction(Self, status, context, metadata, inBuilder, outBuilder);
+	end;
 	FbException.checkException(status);
 end;
 
@@ -8959,25 +9142,25 @@ begin
 	FbException.checkException(status);
 end;
 
-function IUtil.executeCreateDatabase2(status: IStatus; stmtLength: Cardinal; creatDBstatement: PAnsiChar; dialect: Cardinal; dpbLength: Cardinal; dpb: BytePtr; stmtIsCreateDb: BooleanPtr): IAttachment;
+procedure IUtil.convert(status: IStatus; sourceType: Cardinal; sourceScale: Cardinal; sourceLength: Cardinal; source: Pointer; targetType: Cardinal; targetScale: Cardinal; targetLength: Cardinal; target: Pointer);
 begin
 	if (vTable.version < 5) then begin
 		FbException.setVersionError(status, 'IUtil', vTable.version, 5);
-		Result := nil;
 	end
 	else begin
-		Result := UtilVTable(vTable).executeCreateDatabase2(Self, status, stmtLength, creatDBstatement, dialect, dpbLength, dpb, stmtIsCreateDb);
+		UtilVTable(vTable).convert(Self, status, sourceType, sourceScale, sourceLength, source, targetType, targetScale, targetLength, target);
 	end;
 	FbException.checkException(status);
 end;
 
-procedure IUtil.convert(status: IStatus; sourceType: Cardinal; sourceScale: Cardinal; sourceLength: Cardinal; source: Pointer; targetType: Cardinal; targetScale: Cardinal; targetLength: Cardinal; target: Pointer);
+function IUtil.executeCreateDatabase2(status: IStatus; stmtLength: Cardinal; creatDBstatement: PAnsiChar; dialect: Cardinal; dpbLength: Cardinal; dpb: BytePtr; stmtIsCreateDb: BooleanPtr): IAttachment;
 begin
 	if (vTable.version < 6) then begin
 		FbException.setVersionError(status, 'IUtil', vTable.version, 6);
+		Result := nil;
 	end
 	else begin
-		UtilVTable(vTable).convert(Self, status, sourceType, sourceScale, sourceLength, source, targetType, targetScale, targetLength, target);
+		Result := UtilVTable(vTable).executeCreateDatabase2(Self, status, stmtLength, creatDBstatement, dialect, dpbLength, dpb, stmtIsCreateDb);
 	end;
 	FbException.checkException(status);
 end;
@@ -9250,16 +9433,6 @@ begin
 	Result := TraceStatementVTable(vTable).getPerf(Self);
 end;
 
-function ITraceStatement.getPerfStats(): IPerformanceStats;
-begin
-	if (vTable.version < 3) then begin
-		Result := nil;
-	end
-	else begin
-		Result := TraceStatementVTable(vTable).getPerfStats(Self);
-	end;
-end;
-
 function ITraceSQLStatement.getText(): PAnsiChar;
 begin
 	Result := TraceSQLStatementVTable(vTable).getText(Self);
@@ -9285,6 +9458,16 @@ begin
 	Result := TraceSQLStatementVTable(vTable).getExplainedPlan(Self);
 end;
 
+function ITraceSQLStatement.getPerfStats(): IPerformanceStats;
+begin
+	if (vTable.version < 4) then begin
+		Result := nil;
+	end
+	else begin
+		Result := TraceSQLStatementVTable(vTable).getPerfStats(Self);
+	end;
+end;
+
 function ITraceBLRStatement.getData(): BytePtr;
 begin
 	Result := TraceBLRStatementVTable(vTable).getData(Self);
@@ -9298,6 +9481,16 @@ end;
 function ITraceBLRStatement.getText(): PAnsiChar;
 begin
 	Result := TraceBLRStatementVTable(vTable).getText(Self);
+end;
+
+function ITraceBLRStatement.getPerfStats(): IPerformanceStats;
+begin
+	if (vTable.version < 4) then begin
+		Result := nil;
+	end
+	else begin
+		Result := TraceBLRStatementVTable(vTable).getPerfStats(Self);
+	end;
 end;
 
 function ITraceDYNRequest.getData(): BytePtr;
@@ -9632,6 +9825,11 @@ begin
 	Result := TraceInitInfoVTable(vTable).getLogWriter(Self);
 end;
 
+function ITraceInitInfo.getTraceSessionFlags(): Cardinal;
+begin
+	Result := TraceInitInfoVTable(vTable).getTraceSessionFlags(Self);
+end;
+
 function ITracePlugin.trace_get_error(): PAnsiChar;
 begin
 	Result := TracePluginVTable(vTable).trace_get_error(Self);
@@ -9800,6 +9998,18 @@ begin
 	FbException.checkException(status);
 end;
 
+procedure IUdrAggregateFactory.setup(status: IStatus; context: IExternalContext; metadata: IRoutineMetadata; inBuilder: IMetadataBuilder; outBuilder: IMetadataBuilder);
+begin
+	UdrAggregateFactoryVTable(vTable).setup(Self, status, context, metadata, inBuilder, outBuilder);
+	FbException.checkException(status);
+end;
+
+function IUdrAggregateFactory.newItem(status: IStatus; context: IExternalContext; metadata: IRoutineMetadata): IExternalAggregateFunction;
+begin
+	Result := UdrAggregateFactoryVTable(vTable).newItem(Self, status, context, metadata);
+	FbException.checkException(status);
+end;
+
 procedure IUdrProcedureFactory.setup(status: IStatus; context: IExternalContext; metadata: IRoutineMetadata; inBuilder: IMetadataBuilder; outBuilder: IMetadataBuilder);
 begin
 	UdrProcedureFactoryVTable(vTable).setup(Self, status, context, metadata, inBuilder, outBuilder);
@@ -9844,6 +10054,17 @@ end;
 procedure IUdrPlugin.registerTrigger(status: IStatus; name: PAnsiChar; factory: IUdrTriggerFactory);
 begin
 	UdrPluginVTable(vTable).registerTrigger(Self, status, name, factory);
+	FbException.checkException(status);
+end;
+
+procedure IUdrPlugin.registerAggregateFunction(status: IStatus; name: PAnsiChar; factory: IUdrAggregateFactory);
+begin
+	if (vTable.version < 3) then begin
+		FbException.setVersionError(status, 'IUdrPlugin', vTable.version, 3);
+	end
+	else begin
+		UdrPluginVTable(vTable).registerAggregateFunction(Self, status, name, factory);
+	end;
 	FbException.checkException(status);
 end;
 
@@ -14529,6 +14750,95 @@ begin
 	vTable := IExternalFunctionImpl_vTable;
 end;
 
+procedure IExternalAggregateInstanceImpl_disposeDispatcher(this: IExternalAggregateInstance); cdecl;
+begin
+	try
+		IExternalAggregateInstanceImpl(this).dispose();
+	except
+		on e: Exception do FbException.catchException(nil, e);
+	end
+end;
+
+procedure IExternalAggregateInstanceImpl_startDispatcher(this: IExternalAggregateInstance; status: IStatus; context: IExternalContext); cdecl;
+begin
+	try
+		IExternalAggregateInstanceImpl(this).start(status, context);
+	except
+		on e: Exception do FbException.catchException(status, e);
+	end
+end;
+
+procedure IExternalAggregateInstanceImpl_accumulateDispatcher(this: IExternalAggregateInstance; status: IStatus; context: IExternalContext; inMsg: Pointer); cdecl;
+begin
+	try
+		IExternalAggregateInstanceImpl(this).accumulate(status, context, inMsg);
+	except
+		on e: Exception do FbException.catchException(status, e);
+	end
+end;
+
+procedure IExternalAggregateInstanceImpl_groupDispatcher(this: IExternalAggregateInstance; status: IStatus; context: IExternalContext; outMsg: Pointer); cdecl;
+begin
+	try
+		IExternalAggregateInstanceImpl(this).group(status, context, outMsg);
+	except
+		on e: Exception do FbException.catchException(status, e);
+	end
+end;
+
+procedure IExternalAggregateInstanceImpl_finishDispatcher(this: IExternalAggregateInstance; status: IStatus; context: IExternalContext); cdecl;
+begin
+	try
+		IExternalAggregateInstanceImpl(this).finish(status, context);
+	except
+		on e: Exception do FbException.catchException(status, e);
+	end
+end;
+
+var
+	IExternalAggregateInstanceImpl_vTable: ExternalAggregateInstanceVTable;
+
+constructor IExternalAggregateInstanceImpl.create;
+begin
+	vTable := IExternalAggregateInstanceImpl_vTable;
+end;
+
+procedure IExternalAggregateFunctionImpl_disposeDispatcher(this: IExternalAggregateFunction); cdecl;
+begin
+	try
+		IExternalAggregateFunctionImpl(this).dispose();
+	except
+		on e: Exception do FbException.catchException(nil, e);
+	end
+end;
+
+procedure IExternalAggregateFunctionImpl_getCharSetDispatcher(this: IExternalAggregateFunction; status: IStatus; context: IExternalContext; name: PAnsiChar; nameSize: Cardinal); cdecl;
+begin
+	try
+		IExternalAggregateFunctionImpl(this).getCharSet(status, context, name, nameSize);
+	except
+		on e: Exception do FbException.catchException(status, e);
+	end
+end;
+
+function IExternalAggregateFunctionImpl_newInstanceDispatcher(this: IExternalAggregateFunction; status: IStatus; context: IExternalContext): IExternalAggregateInstance; cdecl;
+begin
+	Result := nil;
+	try
+		Result := IExternalAggregateFunctionImpl(this).newInstance(status, context);
+	except
+		on e: Exception do FbException.catchException(status, e);
+	end
+end;
+
+var
+	IExternalAggregateFunctionImpl_vTable: ExternalAggregateFunctionVTable;
+
+constructor IExternalAggregateFunctionImpl.create;
+begin
+	vTable := IExternalAggregateFunctionImpl_vTable;
+end;
+
 procedure IExternalProcedureImpl_disposeDispatcher(this: IExternalProcedure); cdecl;
 begin
 	try
@@ -14798,6 +15108,16 @@ begin
 	Result := nil;
 	try
 		Result := IExternalEngineImpl(this).makeTrigger(status, context, metadata, fieldsBuilder);
+	except
+		on e: Exception do FbException.catchException(status, e);
+	end
+end;
+
+function IExternalEngineImpl_makeAggregateFunctionDispatcher(this: IExternalEngine; status: IStatus; context: IExternalContext; metadata: IRoutineMetadata; inBuilder: IMetadataBuilder; outBuilder: IMetadataBuilder): IExternalAggregateFunction; cdecl;
+begin
+	Result := nil;
+	try
+		Result := IExternalEngineImpl(this).makeAggregateFunction(status, context, metadata, inBuilder, outBuilder);
 	except
 		on e: Exception do FbException.catchException(status, e);
 	end
@@ -15098,20 +15418,20 @@ begin
 	end
 end;
 
-function IUtilImpl_executeCreateDatabase2Dispatcher(this: IUtil; status: IStatus; stmtLength: Cardinal; creatDBstatement: PAnsiChar; dialect: Cardinal; dpbLength: Cardinal; dpb: BytePtr; stmtIsCreateDb: BooleanPtr): IAttachment; cdecl;
+procedure IUtilImpl_convertDispatcher(this: IUtil; status: IStatus; sourceType: Cardinal; sourceScale: Cardinal; sourceLength: Cardinal; source: Pointer; targetType: Cardinal; targetScale: Cardinal; targetLength: Cardinal; target: Pointer); cdecl;
 begin
-	Result := nil;
 	try
-		Result := IUtilImpl(this).executeCreateDatabase2(status, stmtLength, creatDBstatement, dialect, dpbLength, dpb, stmtIsCreateDb);
+		IUtilImpl(this).convert(status, sourceType, sourceScale, sourceLength, source, targetType, targetScale, targetLength, target);
 	except
 		on e: Exception do FbException.catchException(status, e);
 	end
 end;
 
-procedure IUtilImpl_convertDispatcher(this: IUtil; status: IStatus; sourceType: Cardinal; sourceScale: Cardinal; sourceLength: Cardinal; source: Pointer; targetType: Cardinal; targetScale: Cardinal; targetLength: Cardinal; target: Pointer); cdecl;
+function IUtilImpl_executeCreateDatabase2Dispatcher(this: IUtil; status: IStatus; stmtLength: Cardinal; creatDBstatement: PAnsiChar; dialect: Cardinal; dpbLength: Cardinal; dpb: BytePtr; stmtIsCreateDb: BooleanPtr): IAttachment; cdecl;
 begin
+	Result := nil;
 	try
-		IUtilImpl(this).convert(status, sourceType, sourceScale, sourceLength, source, targetType, targetScale, targetLength, target);
+		Result := IUtilImpl(this).executeCreateDatabase2(status, stmtLength, creatDBstatement, dialect, dpbLength, dpb, stmtIsCreateDb);
 	except
 		on e: Exception do FbException.catchException(status, e);
 	end
@@ -15712,16 +16032,6 @@ begin
 	end
 end;
 
-function ITraceStatementImpl_getPerfStatsDispatcher(this: ITraceStatement): IPerformanceStats; cdecl;
-begin
-	Result := nil;
-	try
-		Result := ITraceStatementImpl(this).getPerfStats();
-	except
-		on e: Exception do FbException.catchException(nil, e);
-	end
-end;
-
 var
 	ITraceStatementImpl_vTable: TraceStatementVTable;
 
@@ -15745,16 +16055,6 @@ begin
 	Result := nil;
 	try
 		Result := ITraceSQLStatementImpl(this).getPerf();
-	except
-		on e: Exception do FbException.catchException(nil, e);
-	end
-end;
-
-function ITraceSQLStatementImpl_getPerfStatsDispatcher(this: ITraceSQLStatement): IPerformanceStats; cdecl;
-begin
-	Result := nil;
-	try
-		Result := ITraceSQLStatementImpl(this).getPerfStats();
 	except
 		on e: Exception do FbException.catchException(nil, e);
 	end
@@ -15810,6 +16110,16 @@ begin
 	end
 end;
 
+function ITraceSQLStatementImpl_getPerfStatsDispatcher(this: ITraceSQLStatement): IPerformanceStats; cdecl;
+begin
+	Result := nil;
+	try
+		Result := ITraceSQLStatementImpl(this).getPerfStats();
+	except
+		on e: Exception do FbException.catchException(nil, e);
+	end
+end;
+
 var
 	ITraceSQLStatementImpl_vTable: TraceSQLStatementVTable;
 
@@ -15833,16 +16143,6 @@ begin
 	Result := nil;
 	try
 		Result := ITraceBLRStatementImpl(this).getPerf();
-	except
-		on e: Exception do FbException.catchException(nil, e);
-	end
-end;
-
-function ITraceBLRStatementImpl_getPerfStatsDispatcher(this: ITraceBLRStatement): IPerformanceStats; cdecl;
-begin
-	Result := nil;
-	try
-		Result := ITraceBLRStatementImpl(this).getPerfStats();
 	except
 		on e: Exception do FbException.catchException(nil, e);
 	end
@@ -15873,6 +16173,16 @@ begin
 	Result := nil;
 	try
 		Result := ITraceBLRStatementImpl(this).getText();
+	except
+		on e: Exception do FbException.catchException(nil, e);
+	end
+end;
+
+function ITraceBLRStatementImpl_getPerfStatsDispatcher(this: ITraceBLRStatement): IPerformanceStats; cdecl;
+begin
+	Result := nil;
+	try
+		Result := ITraceBLRStatementImpl(this).getPerfStats();
 	except
 		on e: Exception do FbException.catchException(nil, e);
 	end
@@ -16587,6 +16897,16 @@ begin
 	end
 end;
 
+function ITraceInitInfoImpl_getTraceSessionFlagsDispatcher(this: ITraceInitInfo): Cardinal; cdecl;
+begin
+	Result := 0;
+	try
+		Result := ITraceInitInfoImpl(this).getTraceSessionFlags();
+	except
+		on e: Exception do FbException.catchException(nil, e);
+	end
+end;
+
 var
 	ITraceInitInfoImpl_vTable: TraceInitInfoVTable;
 
@@ -16974,6 +17294,42 @@ begin
 	vTable := IUdrFunctionFactoryImpl_vTable;
 end;
 
+procedure IUdrAggregateFactoryImpl_disposeDispatcher(this: IUdrAggregateFactory); cdecl;
+begin
+	try
+		IUdrAggregateFactoryImpl(this).dispose();
+	except
+		on e: Exception do FbException.catchException(nil, e);
+	end
+end;
+
+procedure IUdrAggregateFactoryImpl_setupDispatcher(this: IUdrAggregateFactory; status: IStatus; context: IExternalContext; metadata: IRoutineMetadata; inBuilder: IMetadataBuilder; outBuilder: IMetadataBuilder); cdecl;
+begin
+	try
+		IUdrAggregateFactoryImpl(this).setup(status, context, metadata, inBuilder, outBuilder);
+	except
+		on e: Exception do FbException.catchException(status, e);
+	end
+end;
+
+function IUdrAggregateFactoryImpl_newItemDispatcher(this: IUdrAggregateFactory; status: IStatus; context: IExternalContext; metadata: IRoutineMetadata): IExternalAggregateFunction; cdecl;
+begin
+	Result := nil;
+	try
+		Result := IUdrAggregateFactoryImpl(this).newItem(status, context, metadata);
+	except
+		on e: Exception do FbException.catchException(status, e);
+	end
+end;
+
+var
+	IUdrAggregateFactoryImpl_vTable: UdrAggregateFactoryVTable;
+
+constructor IUdrAggregateFactoryImpl.create;
+begin
+	vTable := IUdrAggregateFactoryImpl_vTable;
+end;
+
 procedure IUdrProcedureFactoryImpl_disposeDispatcher(this: IUdrProcedureFactory); cdecl;
 begin
 	try
@@ -17078,6 +17434,15 @@ procedure IUdrPluginImpl_registerTriggerDispatcher(this: IUdrPlugin; status: ISt
 begin
 	try
 		IUdrPluginImpl(this).registerTrigger(status, name, factory);
+	except
+		on e: Exception do FbException.catchException(status, e);
+	end
+end;
+
+procedure IUdrPluginImpl_registerAggregateFunctionDispatcher(this: IUdrPlugin; status: IStatus; name: PAnsiChar; factory: IUdrAggregateFactory); cdecl;
+begin
+	try
+		IUdrPluginImpl(this).registerAggregateFunction(status, name, factory);
 	except
 		on e: Exception do FbException.catchException(status, e);
 	end
@@ -18557,6 +18922,20 @@ initialization
 	IExternalFunctionImpl_vTable.getCharSet := @IExternalFunctionImpl_getCharSetDispatcher;
 	IExternalFunctionImpl_vTable.execute := @IExternalFunctionImpl_executeDispatcher;
 
+	IExternalAggregateInstanceImpl_vTable := ExternalAggregateInstanceVTable.create;
+	IExternalAggregateInstanceImpl_vTable.version := 3;
+	IExternalAggregateInstanceImpl_vTable.dispose := @IExternalAggregateInstanceImpl_disposeDispatcher;
+	IExternalAggregateInstanceImpl_vTable.start := @IExternalAggregateInstanceImpl_startDispatcher;
+	IExternalAggregateInstanceImpl_vTable.accumulate := @IExternalAggregateInstanceImpl_accumulateDispatcher;
+	IExternalAggregateInstanceImpl_vTable.group := @IExternalAggregateInstanceImpl_groupDispatcher;
+	IExternalAggregateInstanceImpl_vTable.finish := @IExternalAggregateInstanceImpl_finishDispatcher;
+
+	IExternalAggregateFunctionImpl_vTable := ExternalAggregateFunctionVTable.create;
+	IExternalAggregateFunctionImpl_vTable.version := 3;
+	IExternalAggregateFunctionImpl_vTable.dispose := @IExternalAggregateFunctionImpl_disposeDispatcher;
+	IExternalAggregateFunctionImpl_vTable.getCharSet := @IExternalAggregateFunctionImpl_getCharSetDispatcher;
+	IExternalAggregateFunctionImpl_vTable.newInstance := @IExternalAggregateFunctionImpl_newInstanceDispatcher;
+
 	IExternalProcedureImpl_vTable := ExternalProcedureVTable.create;
 	IExternalProcedureImpl_vTable.version := 3;
 	IExternalProcedureImpl_vTable.dispose := @IExternalProcedureImpl_disposeDispatcher;
@@ -18583,7 +18962,7 @@ initialization
 	IRoutineMetadataImpl_vTable.getSchema := @IRoutineMetadataImpl_getSchemaDispatcher;
 
 	IExternalEngineImpl_vTable := ExternalEngineVTable.create;
-	IExternalEngineImpl_vTable.version := 4;
+	IExternalEngineImpl_vTable.version := 5;
 	IExternalEngineImpl_vTable.addRef := @IExternalEngineImpl_addRefDispatcher;
 	IExternalEngineImpl_vTable.release := @IExternalEngineImpl_releaseDispatcher;
 	IExternalEngineImpl_vTable.setOwner := @IExternalEngineImpl_setOwnerDispatcher;
@@ -18594,6 +18973,7 @@ initialization
 	IExternalEngineImpl_vTable.makeFunction := @IExternalEngineImpl_makeFunctionDispatcher;
 	IExternalEngineImpl_vTable.makeProcedure := @IExternalEngineImpl_makeProcedureDispatcher;
 	IExternalEngineImpl_vTable.makeTrigger := @IExternalEngineImpl_makeTriggerDispatcher;
+	IExternalEngineImpl_vTable.makeAggregateFunction := @IExternalEngineImpl_makeAggregateFunctionDispatcher;
 
 	ITimerImpl_vTable := TimerVTable.create;
 	ITimerImpl_vTable.version := 3;
@@ -18634,8 +19014,8 @@ initialization
 	IUtilImpl_vTable.getInt128 := @IUtilImpl_getInt128Dispatcher;
 	IUtilImpl_vTable.decodeTimeTzEx := @IUtilImpl_decodeTimeTzExDispatcher;
 	IUtilImpl_vTable.decodeTimeStampTzEx := @IUtilImpl_decodeTimeStampTzExDispatcher;
-	IUtilImpl_vTable.executeCreateDatabase2 := @IUtilImpl_executeCreateDatabase2Dispatcher;
 	IUtilImpl_vTable.convert := @IUtilImpl_convertDispatcher;
+	IUtilImpl_vTable.executeCreateDatabase2 := @IUtilImpl_executeCreateDatabase2Dispatcher;
 
 	IOffsetsCallbackImpl_vTable := OffsetsCallbackVTable.create;
 	IOffsetsCallbackImpl_vTable.version := 2;
@@ -18709,30 +19089,29 @@ initialization
 	ITraceParamsImpl_vTable.getTextUTF8 := @ITraceParamsImpl_getTextUTF8Dispatcher;
 
 	ITraceStatementImpl_vTable := TraceStatementVTable.create;
-	ITraceStatementImpl_vTable.version := 3;
+	ITraceStatementImpl_vTable.version := 2;
 	ITraceStatementImpl_vTable.getStmtID := @ITraceStatementImpl_getStmtIDDispatcher;
 	ITraceStatementImpl_vTable.getPerf := @ITraceStatementImpl_getPerfDispatcher;
-	ITraceStatementImpl_vTable.getPerfStats := @ITraceStatementImpl_getPerfStatsDispatcher;
 
 	ITraceSQLStatementImpl_vTable := TraceSQLStatementVTable.create;
 	ITraceSQLStatementImpl_vTable.version := 4;
 	ITraceSQLStatementImpl_vTable.getStmtID := @ITraceSQLStatementImpl_getStmtIDDispatcher;
 	ITraceSQLStatementImpl_vTable.getPerf := @ITraceSQLStatementImpl_getPerfDispatcher;
-	ITraceSQLStatementImpl_vTable.getPerfStats := @ITraceSQLStatementImpl_getPerfStatsDispatcher;
 	ITraceSQLStatementImpl_vTable.getText := @ITraceSQLStatementImpl_getTextDispatcher;
 	ITraceSQLStatementImpl_vTable.getPlan := @ITraceSQLStatementImpl_getPlanDispatcher;
 	ITraceSQLStatementImpl_vTable.getInputs := @ITraceSQLStatementImpl_getInputsDispatcher;
 	ITraceSQLStatementImpl_vTable.getTextUTF8 := @ITraceSQLStatementImpl_getTextUTF8Dispatcher;
 	ITraceSQLStatementImpl_vTable.getExplainedPlan := @ITraceSQLStatementImpl_getExplainedPlanDispatcher;
+	ITraceSQLStatementImpl_vTable.getPerfStats := @ITraceSQLStatementImpl_getPerfStatsDispatcher;
 
 	ITraceBLRStatementImpl_vTable := TraceBLRStatementVTable.create;
 	ITraceBLRStatementImpl_vTable.version := 4;
 	ITraceBLRStatementImpl_vTable.getStmtID := @ITraceBLRStatementImpl_getStmtIDDispatcher;
 	ITraceBLRStatementImpl_vTable.getPerf := @ITraceBLRStatementImpl_getPerfDispatcher;
-	ITraceBLRStatementImpl_vTable.getPerfStats := @ITraceBLRStatementImpl_getPerfStatsDispatcher;
 	ITraceBLRStatementImpl_vTable.getData := @ITraceBLRStatementImpl_getDataDispatcher;
 	ITraceBLRStatementImpl_vTable.getDataLength := @ITraceBLRStatementImpl_getDataLengthDispatcher;
 	ITraceBLRStatementImpl_vTable.getText := @ITraceBLRStatementImpl_getTextDispatcher;
+	ITraceBLRStatementImpl_vTable.getPerfStats := @ITraceBLRStatementImpl_getPerfStatsDispatcher;
 
 	ITraceDYNRequestImpl_vTable := TraceDYNRequestVTable.create;
 	ITraceDYNRequestImpl_vTable.version := 2;
@@ -18826,6 +19205,7 @@ initialization
 	ITraceInitInfoImpl_vTable.getDatabaseName := @ITraceInitInfoImpl_getDatabaseNameDispatcher;
 	ITraceInitInfoImpl_vTable.getConnection := @ITraceInitInfoImpl_getConnectionDispatcher;
 	ITraceInitInfoImpl_vTable.getLogWriter := @ITraceInitInfoImpl_getLogWriterDispatcher;
+	ITraceInitInfoImpl_vTable.getTraceSessionFlags := @ITraceInitInfoImpl_getTraceSessionFlagsDispatcher;
 
 	ITracePluginImpl_vTable := TracePluginVTable.create;
 	ITracePluginImpl_vTable.version := 5;
@@ -18872,6 +19252,12 @@ initialization
 	IUdrFunctionFactoryImpl_vTable.setup := @IUdrFunctionFactoryImpl_setupDispatcher;
 	IUdrFunctionFactoryImpl_vTable.newItem := @IUdrFunctionFactoryImpl_newItemDispatcher;
 
+	IUdrAggregateFactoryImpl_vTable := UdrAggregateFactoryVTable.create;
+	IUdrAggregateFactoryImpl_vTable.version := 3;
+	IUdrAggregateFactoryImpl_vTable.dispose := @IUdrAggregateFactoryImpl_disposeDispatcher;
+	IUdrAggregateFactoryImpl_vTable.setup := @IUdrAggregateFactoryImpl_setupDispatcher;
+	IUdrAggregateFactoryImpl_vTable.newItem := @IUdrAggregateFactoryImpl_newItemDispatcher;
+
 	IUdrProcedureFactoryImpl_vTable := UdrProcedureFactoryVTable.create;
 	IUdrProcedureFactoryImpl_vTable.version := 3;
 	IUdrProcedureFactoryImpl_vTable.dispose := @IUdrProcedureFactoryImpl_disposeDispatcher;
@@ -18885,11 +19271,12 @@ initialization
 	IUdrTriggerFactoryImpl_vTable.newItem := @IUdrTriggerFactoryImpl_newItemDispatcher;
 
 	IUdrPluginImpl_vTable := UdrPluginVTable.create;
-	IUdrPluginImpl_vTable.version := 2;
+	IUdrPluginImpl_vTable.version := 3;
 	IUdrPluginImpl_vTable.getMaster := @IUdrPluginImpl_getMasterDispatcher;
 	IUdrPluginImpl_vTable.registerFunction := @IUdrPluginImpl_registerFunctionDispatcher;
 	IUdrPluginImpl_vTable.registerProcedure := @IUdrPluginImpl_registerProcedureDispatcher;
 	IUdrPluginImpl_vTable.registerTrigger := @IUdrPluginImpl_registerTriggerDispatcher;
+	IUdrPluginImpl_vTable.registerAggregateFunction := @IUdrPluginImpl_registerAggregateFunctionDispatcher;
 
 	IDecFloat16Impl_vTable := DecFloat16VTable.create;
 	IDecFloat16Impl_vTable.version := 2;
@@ -19062,6 +19449,8 @@ finalization
 	IExternalContextImpl_vTable.destroy;
 	IExternalResultSetImpl_vTable.destroy;
 	IExternalFunctionImpl_vTable.destroy;
+	IExternalAggregateInstanceImpl_vTable.destroy;
+	IExternalAggregateFunctionImpl_vTable.destroy;
 	IExternalProcedureImpl_vTable.destroy;
 	IExternalTriggerImpl_vTable.destroy;
 	IRoutineMetadataImpl_vTable.destroy;
@@ -19092,6 +19481,7 @@ finalization
 	ITracePluginImpl_vTable.destroy;
 	ITraceFactoryImpl_vTable.destroy;
 	IUdrFunctionFactoryImpl_vTable.destroy;
+	IUdrAggregateFactoryImpl_vTable.destroy;
 	IUdrProcedureFactoryImpl_vTable.destroy;
 	IUdrTriggerFactoryImpl_vTable.destroy;
 	IUdrPluginImpl_vTable.destroy;

@@ -539,6 +539,26 @@ public:
 		rpr_rdb(0), rpr_rtr(0),
 		rpr_in_msg(0), rpr_out_msg(0), rpr_in_format(0), rpr_out_format(0)
 	{ }
+
+	~Rpr()
+	{
+		clear();
+	}
+
+	void clear()
+	{
+		delete rpr_in_msg;
+		rpr_in_msg = nullptr;
+
+		delete rpr_out_msg;
+		rpr_out_msg = nullptr;
+
+		delete rpr_in_format;
+		rpr_in_format = nullptr;
+
+		delete rpr_out_format;
+		rpr_out_format = nullptr;
+	}
 };
 
 struct Rrq : public Firebird::GlobalStorage, public TypedHandle<rem_type_rrq>
@@ -913,7 +933,9 @@ class InternalCryptKey final :
 {
 public:
 	InternalCryptKey()
-		: keyName(getPool())
+		: encrypt(getPool()),
+		  decrypt(getPool()),
+		  keyName(getPool())
 	{ }
 
 	// ICryptKey implementation
@@ -926,8 +948,8 @@ public:
 	class Key : public Firebird::UCharBuffer
 	{
 	public:
-		Key()
-			: Firebird::UCharBuffer(getPool())
+		Key(MemoryPool& pool)
+			: Firebird::UCharBuffer(pool)
 		{ }
 
 		void set(unsigned keyLength, const void* key)
@@ -1137,7 +1159,7 @@ public:
 
 	~ClntAuthBlock()
 	{
-		releaseKeys(0);
+		releaseKeys();
 
 		if (createdInterface)
 			*createdInterface = nullptr;
@@ -1154,7 +1176,7 @@ public:
 	bool checkPluginName(Firebird::PathName& nameToCheck);
 	Firebird::PathName getPluginName();
 	void tryNewKeys(rem_port*);
-	void releaseKeys(unsigned from);
+	void releaseKeys();
 	Firebird::RefPtr<const Firebird::Config>* getConfig() noexcept;
 	void createCryptCallback(Firebird::ICryptKeyCallback** callback);
 
@@ -1256,6 +1278,8 @@ inline constexpr USHORT PORT_connecting		= 0x0400;	// Aux connection waits for a
 //inline constexpr USHORT PORT_z_data		= 0x0800;	// Zlib incoming buffer has data left after decompression
 inline constexpr USHORT PORT_compressed		= 0x1000;	// Compress outgoing stream (does not affect incoming)
 inline constexpr USHORT PORT_released		= 0x2000;	// release(), complementary to the first addRef() in constructor, was called
+inline constexpr USHORT PORT_unix			= 0x4000;	// Port uses Unix domain socket transport
+inline constexpr USHORT PORT_unix_unlink	= 0x8000;	// Unlink port_address when Unix domain socket port is disconnected
 
 // forward decl
 class RemotePortGuard;
@@ -1320,8 +1344,7 @@ struct rem_port : public Firebird::GlobalStorage, public Firebird::RefCounted
 	SOCKET			port_channel;		// handle for connection (from by OS)
 	struct linger	port_linger;		// linger value as defined by SO_LINGER
 	Rdb*			port_context;
-	Thread::Handle	port_events_thread;	// handle of thread, handling incoming events
-	Thread			port_events_threadId;
+	Thread			port_events_thread;	// thread handling incoming events
 	RemotePortGuard* port_thread_guard;	// will close port_events_thread in safe way
 #ifdef WIN_NT
 	HANDLE			port_pipe;			// port pipe handle
@@ -1485,7 +1508,7 @@ public:
 		port_flags(0), port_partial_data(false), port_z_data(false),
 		port_connect_timeout(0), port_dummy_packet_interval(0),
 		port_dummy_timeout(0), port_handle(INVALID_SOCKET), port_channel(INVALID_SOCKET), port_context(0),
-		port_events_thread(0), port_thread_guard(0),
+		port_thread_guard(0),
 #ifdef WIN_NT
 		port_pipe(INVALID_HANDLE_VALUE), port_event(INVALID_HANDLE_VALUE),
 #endif
@@ -1769,7 +1792,7 @@ private:
 		{
 			if (waitFlag)
 			{
-				Thread::waitForCompletion(waitHandle);
+				thread.waitForCompletion();
 
 				fb_assert(asyncPort);
 
@@ -1781,7 +1804,7 @@ private:
 		}
 
 		rem_port* asyncPort;
-		Thread::Handle waitHandle{};
+		Thread thread{};
 		bool waitFlag;
 	};
 
@@ -1794,9 +1817,9 @@ public:
 			wThr.asyncPort->port_thread_guard = this;
 	}
 
-	void setWait(Thread::Handle& handle) noexcept
+	void setWait(Thread&& handle) noexcept
 	{
-		wThr.waitHandle = handle;
+		wThr.thread = std::move(handle);
 		wThr.waitFlag = true;
 		fb_assert(wThr.asyncPort);
 		wThr.asyncPort->port_thread_guard = nullptr;

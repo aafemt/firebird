@@ -27,7 +27,7 @@
 #include "../jrd/tra.h"
 #include "../jrd/pag.h"
 #include "../jrd/cch_proto.h"
-#include "../jrd/lck_proto.h"
+#include "../jrd/lck.h"
 #include "../jrd/ods_proto.h"
 #include "../jrd/tpc_proto.h"
 #include "../jrd/tra_proto.h"
@@ -1179,6 +1179,17 @@ StmtNumber TipCache::generateStatementId()
 	// No barrier here, because statement id order does not generally matter
 	StmtNumber statement_id = header->latest_statement_id++ + 1;
 	return statement_id;
+}
+
+FB_UINT64 TipCache::generateLocalTableId()
+{
+	// Can only be called on initialized TipCache
+	fb_assert(m_tpcHeader);
+	GlobalTpcHeader* header = m_tpcHeader->getHeader();
+
+	// No barrier here, because local table id order does not generally matter
+	FB_UINT64 local_table_id = header->latest_local_table_id++ + 1;
+	return local_table_id;
 }
 
 //void TipCache::assignLatestTransactionId(TraNumber number) {
