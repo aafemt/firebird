@@ -129,7 +129,7 @@ UTILITIES
 
     4. Replication
     There is an apply_tablespaces_ddl parameter for replication, it may be configured for the replica side.
-    If this parameter is disabled, CREATE/ALTER/DROP TSABLESPACE statements will not be ignored on the replica and
+    If this parameter is disabled, CREATE/ALTER/DROP TSABLESPACE statements will be ignored on the replica and
     tablespace-related clauses in CREATE/ALTER TABLE/INDEX statements will also be ignored.
     This parameter is useful when the replica has its own set of tablespaces or none at all.
 
