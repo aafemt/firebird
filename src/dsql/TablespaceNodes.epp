@@ -158,6 +158,7 @@ void CreateAlterTablespaceNode::executeCreate(thread_db* tdbb, DsqlCompilerScrat
 {
 	const auto dbb = tdbb->getDatabase();
 	const auto attachment = transaction->getAttachment();
+	const auto metaTransaction = attachment->getMetaTransaction(tdbb);
 
 	const MetaName& userName = attachment->att_user->getUserName();
 
@@ -166,6 +167,24 @@ void CreateAlterTablespaceNode::executeCreate(thread_db* tdbb, DsqlCompilerScrat
 	{
 		return;
 	}
+
+	// User-defined tablespaces are not compatible with shadows
+
+	static const CachedRequestId checkShadowFilesId;
+	AutoCacheRequest checkShadowFiles(tdbb, checkShadowFilesId);
+
+	FOR (REQUEST_HANDLE checkShadowFiles TRANSACTION_HANDLE metaTransaction)
+		FIRST 1 F IN RDB$FILES
+		WITH F.RDB$SHADOW_NUMBER NOT MISSING
+		AND F.RDB$SHADOW_NUMBER NE 0
+	{
+		static const auto errorMsg = "Cannot create tablespace because the database has shadows defined";
+		status_exception::raise(
+			Arg::Gds(isc_sqlerr) << Arg::Num(-607) <<
+			Arg::Gds(isc_dsql_command_err) <<
+			Arg::Gds(isc_random) << Arg::Str(errorMsg));
+	}
+	END_FOR
 
 	executeDdlTrigger(tdbb, dsqlScratch, transaction, DTW_BEFORE,
 		DDL_TRIGGER_CREATE_TABLESPACE, QualifiedName(name), {});

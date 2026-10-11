@@ -15502,8 +15502,7 @@ void CreateShadowNode::checkPermission(thread_db* tdbb)
 
 void CreateShadowNode::execute(thread_db* tdbb, DsqlCompilerScratch* /*dsqlScratch*/, jrd_tra* transaction)
 {
-	// Should be caught by the parser.
-	if (number == 0)
+	if (number == 0) // should be caught by the parser
 	{
 		status_exception::raise(
 			Arg::Gds(isc_sqlerr) << Arg::Num(-607) <<
@@ -15514,9 +15513,28 @@ void CreateShadowNode::execute(thread_db* tdbb, DsqlCompilerScratch* /*dsqlScrat
 	// run all statements under savepoint control
 	AutoSavePoint savePoint(tdbb, transaction);
 
+	const auto attachment = transaction->getAttachment();
+	const auto metaTransaction = attachment->getMetaTransaction(tdbb);
+
+	// Shadows are not compatible with user-defined tablespaces
+
+	static const CachedRequestId checkUserTablespacesId;
+	AutoCacheRequest checkUserTablespaces(tdbb, checkUserTablespacesId);
+
+	FOR (REQUEST_HANDLE checkUserTablespaces TRANSACTION_HANDLE metaTransaction)
+		FIRST 1 TS IN RDB$TABLESPACES
+		WITH TS.RDB$SYSTEM_FLAG NE 1
+	{
+		static const auto errorMsg = "Cannot create shadow because the database has user-defined tablespaces";
+		status_exception::raise(
+			Arg::Gds(isc_sqlerr) << Arg::Num(-607) <<
+			Arg::Gds(isc_dsql_command_err) <<
+			Arg::Gds(isc_random) << Arg::Str(errorMsg));
+	}
+	END_FOR
+
 	// If a shadow set identified by the shadow number already exists return error
 
-	auto* metaTransaction = tdbb->getAttachment()->getMetaTransaction(tdbb);
 	AutoCacheRequest request(tdbb, drq_l_shadow, DYN_REQUESTS);
 
 	FOR(REQUEST_HANDLE request TRANSACTION_HANDLE metaTransaction)
