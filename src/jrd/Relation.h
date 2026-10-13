@@ -363,6 +363,19 @@ public:
 		m_dpMapMark = from.m_dpMapMark;
 	}
 
+	void free(RelationPages*& nextFree)
+	{
+		Firebird::MutexLockGuard guard(m_mutex, FB_FUNCTION);
+
+		reset();
+
+		m_freePages = nextFree;
+		nextFree = this;
+
+		m_dpMap.clear();
+		m_dpMapMark = 0;
+	}
+
 	void reset(ULONG pageSpaceId = INVALID_PAGE_SPACE)
 	{
 		Firebird::MutexLockGuard guard(m_mutex, FB_FUNCTION);
@@ -559,8 +572,6 @@ public:
 		m_freePages = nullptr;
 		return freePages;
 	}
-
-	void free(RelationPages*& nextFree);
 
 	static inline InstanceId generate(const RelationPages* item) noexcept
 	{
@@ -774,17 +785,27 @@ private:
 class IndexVersion final : public ObjectBase
 {
 public:
-	IndexVersion(MemoryPool& p, Cached::Index* idp);
+	IndexVersion(MemoryPool& p, Cached::Index* idp)
+		: perm(idp)
+	{}
 
 	static IndexVersion* create(thread_db* tdbb, MemoryPool& p, Cached::Index* idp)
 	{
 		return FB_NEW_POOL(p) IndexVersion(p, idp);
 	}
-	static void destroy(thread_db* tdbb, IndexVersion* idv);
+
+	static void destroy(thread_db* tdbb, IndexVersion* idv)
+	{
+		delete idv;
+	}
+
+	ObjectType objectType() noexcept
+	{
+		return obj_index;
+	}
 
 	ScanResult scan(thread_db* tdbb, ObjectBase::Flag flags);
 	static std::optional<MetaId> getIdByName(thread_db* tdbb, ExName<RelationPermanent*> name);
-	static ObjectType objectType() noexcept;
 
 	ScanResult reload(thread_db* tdbb, ObjectBase::Flag flags)
 	{

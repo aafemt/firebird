@@ -44,73 +44,284 @@ using namespace Jrd;
 using namespace Firebird;
 
 
-TrigArray::TrigArray(MemoryPool& p)
-	: preErase(p), postErase(p), preModify(p),
-	  postModify(p), preStore(p), postStore(p)
-{ }
+//
+// class GCLock
+//
 
-Triggers& TrigArray::operator[](int t)
+void GCLock::blockingAst()
 {
-	switch(t)
+	/****
+	 SR - gc forbidden, awaiting moment to re-establish SW lock
+	 SW - gc allowed, usual state
+	 PW - gc allowed to the one connection only
+	****/
+
+	const auto dbb = m_lock->lck_dbb;
+
+	AsyncContextHolder tdbb(dbb, FB_FUNCTION);
+
+	unsigned oldFlags = m_flags.load(std::memory_order_acquire);
+	do
 	{
-	case TRIGGER_PRE_STORE:
-		return preStore;
+		fb_assert(oldFlags & GC_locked);
+		if (!(oldFlags & GC_locked)) // work already done synchronously ?
+			return;
+	} while (!m_flags.compare_exchange_weak(oldFlags, oldFlags | GC_blocking,
+										  std::memory_order_release, std::memory_order_acquire));
 
-	case TRIGGER_POST_STORE:
-		return postStore;
+	if (oldFlags & GC_counterMask)
+		return;
 
-	case TRIGGER_PRE_MODIFY:
-		return preModify;
+	if (oldFlags & GC_disabled)
+	{
+		// someone acquired EX lock
 
-	case TRIGGER_POST_MODIFY:
-		return postModify;
+		fb_assert(m_lock->lck_id);
+		fb_assert(m_lock->lck_physical == LCK_SR);
 
-	case TRIGGER_PRE_ERASE:
-		return preErase;
-
-	case TRIGGER_POST_ERASE:
-		return postErase;
+		LCK_release(tdbb, m_lock);
+		m_flags.fetch_and(~(GC_disabled | GC_blocking | GC_locked));
 	}
+	else
+	{
+		// someone acquired PW lock
 
-	fb_assert(false);
-	fatal_exception::raise("Invalid trigger type");
+		fb_assert(m_lock->lck_id);
+		fb_assert(m_lock->lck_physical == LCK_SW);
+
+		m_flags.fetch_or(GC_disabled);
+		downgrade(tdbb);
+	}
 }
 
-const Triggers& TrigArray::operator[](int t) const
+void GCLock::checkGuard(unsigned flags)
 {
-	switch(t)
+	if (flags & GC_guardBit)
 	{
-	case TRIGGER_PRE_STORE:
-		return preStore;
-
-	case TRIGGER_POST_STORE:
-		return postStore;
-
-	case TRIGGER_PRE_MODIFY:
-		return preModify;
-
-	case TRIGGER_POST_MODIFY:
-		return postModify;
-
-	case TRIGGER_PRE_ERASE:
-		return preErase;
-
-	case TRIGGER_POST_ERASE:
-		return postErase;
+		fatal_exception::raiseFmt
+			("Overflow or underflow when changing GC lock atomic counter (guard bit set), flags %08x", flags);
 	}
-
-	fb_assert(false);
-	fatal_exception::raise("Invalid trigger type");
 }
 
-jrd_rel::jrd_rel(MemoryPool& p, Cached::Relation* r)
-	: rel_pool(&p),
-	  rel_perm(r),
-	  rel_view_contexts(p),
-	  rel_triggers(p),
-	  rel_ss_definer(false),
-	  rel_scan_count(0)
-{}
+bool GCLock::acquire(thread_db* tdbb, int wait)
+{
+	unsigned oldFlags = m_flags.load(std::memory_order_acquire);
+	for(;;)
+	{
+		if (oldFlags & (GC_blocking | GC_disabled))		// lock should not be obtained
+			return false;
+
+		const unsigned newFlags = oldFlags + 1;
+		checkGuard(newFlags);
+
+		if (!m_flags.compare_exchange_weak(oldFlags, newFlags, std::memory_order_release, std::memory_order_acquire))
+			continue;
+
+		if (oldFlags & GC_locked)			// lock was already taken when we checked flags
+			return true;
+
+		if (!(oldFlags & GC_counterMask))	// we must take lock
+			break;
+
+		// undefined state - someone else is taking/releasing a lock right now:
+		oldFlags = m_flags.fetch_sub(1, std::memory_order_acquire);	// decrement our lock counter,
+		checkGuard(oldFlags - 1);
+		Thread::yield();											// wait a bit
+		oldFlags = m_flags.load(std::memory_order_acquire);			// and retry
+	}
+
+	// No need to use LM for LTT
+	if (m_relation->isLTT())
+		return true;
+
+	// We incremented counter from 0 to 1 - take care about lck
+	if (!m_lock)
+		m_lock = m_relation->createLock(tdbb, LCK_rel_gc, false);
+
+	fb_assert(!m_lock->lck_id);
+
+	ThreadStatusGuard temp_status(tdbb);
+
+	bool ret;
+	if (oldFlags & GC_disabled)
+		ret = LCK_lock(tdbb, m_lock, LCK_SR, wait);
+	else
+	{
+		ret = LCK_lock(tdbb, m_lock, LCK_SW, wait);
+		if (ret)
+		{
+			m_flags.fetch_or(GC_locked);
+			return true;
+		}
+
+		oldFlags = m_flags.fetch_or(GC_disabled, std::memory_order_seq_cst) | GC_disabled;
+		ret = LCK_lock(tdbb, m_lock, LCK_SR, wait);
+	}
+
+	unsigned newFlags;
+	do
+	{
+		newFlags = oldFlags - 1;
+		checkGuard(newFlags);
+
+		if (!ret)
+			newFlags &= ~GC_disabled;
+
+	} while (!m_flags.compare_exchange_weak(oldFlags, newFlags, std::memory_order_release, std::memory_order_acquire));
+
+	return false;
+}
+
+void GCLock::downgrade(thread_db* tdbb)
+{
+	unsigned oldFlags = m_flags.load(std::memory_order_acquire);
+	unsigned newFlags;
+	do
+	{
+		newFlags = oldFlags - 1;
+		checkGuard(newFlags);
+	} while (!m_flags.compare_exchange_weak(oldFlags, newFlags, std::memory_order_release, std::memory_order_acquire));
+
+	if ((!m_relation->isLTT()) && ((newFlags & GC_counterMask) == 0) && (newFlags & GC_blocking))
+	{
+		fb_assert(newFlags & GC_locked);
+		fb_assert(m_lock->lck_id);
+		fb_assert(m_lock->lck_physical == LCK_SW);
+
+		LCK_downgrade(tdbb, m_lock);
+
+		oldFlags = newFlags;
+		do
+		{
+			newFlags = oldFlags;
+			if (m_lock->lck_physical != LCK_SR)
+			{
+				newFlags &= ~GC_disabled;
+				if (m_lock->lck_physical < LCK_SR)
+					newFlags &= ~GC_locked;
+			}
+			else
+				newFlags |= GC_disabled;
+
+			newFlags &= ~GC_blocking;
+		} while (!m_flags.compare_exchange_weak(oldFlags, newFlags, std::memory_order_release, std::memory_order_acquire));
+	}
+}
+
+// violates rules of atomic counters - ok ONLY for ASSERT
+unsigned GCLock::getSweepCount() const
+{
+	return m_flags.load(std::memory_order_relaxed) & GC_counterMask;
+}
+
+bool GCLock::disable(thread_db* tdbb, int wait, Lock*& tempLock)
+{
+	ThreadStatusGuard temp_status(tdbb);
+
+	// if validation is already running - go out
+	unsigned oldFlags = m_flags.load(std::memory_order_acquire);
+	do {
+		if (oldFlags & GC_disabled)
+			return false;
+	} while (m_flags.compare_exchange_weak(oldFlags, oldFlags | GC_disabled,
+										   std::memory_order_release, std::memory_order_acquire));
+
+	int sleeps = -wait * 10;
+	while (m_flags.load(std::memory_order_relaxed) & GC_counterMask)
+	{
+		EngineCheckout cout(tdbb, FB_FUNCTION);
+		Thread::sleep(100);
+
+		if (wait < 0 && --sleeps == 0)
+			break;
+	}
+
+	if (m_flags.load(std::memory_order_relaxed) & GC_counterMask)
+	{
+		m_flags.fetch_and(~GC_disabled);
+		return false;
+	}
+
+	if (m_relation->isLTT())
+		return true;
+
+	ensureReleased(tdbb);
+
+	// we need no AST here
+	if (!tempLock)
+		tempLock = m_relation->createLock(tdbb, LCK_rel_gc, true);
+
+	const bool ret = LCK_lock(tdbb, tempLock, LCK_PW, wait);
+	if (!ret)
+		m_flags.fetch_and(~GC_disabled);
+
+	return ret;
+}
+
+void GCLock::ensureReleased(thread_db* tdbb)
+{
+	if (!m_lock)
+		return;
+
+	unsigned oldFlags = m_flags.load(std::memory_order_acquire);
+	for (;;)
+	{
+		if (oldFlags & GC_locked)
+		{
+			if (!m_flags.compare_exchange_strong(oldFlags, oldFlags & ~GC_locked,
+											     std::memory_order_release, std::memory_order_acquire))
+			{
+				continue;
+			}
+
+			// exactly one who cleared GC_locked bit releases a lock
+			LCK_release(tdbb, m_lock);
+		}
+
+		return;
+	}
+}
+
+void GCLock::forcedRelease(thread_db* tdbb)
+{
+	m_flags.fetch_and(~GC_locked);
+
+	if (m_lock)
+		LCK_release(tdbb, m_lock);
+}
+
+void GCLock::enable(thread_db* tdbb, Lock* tempLock)
+{
+	if (!(tempLock && tempLock->lck_id))
+		return;
+
+	fb_assert(m_flags.load() & GC_disabled);
+
+	ensureReleased(tdbb);
+
+	LCK_convert(tdbb, tempLock, LCK_EX, LCK_WAIT);
+	m_flags.fetch_and(~GC_disabled);
+
+	LCK_release(tdbb, tempLock);
+}
+
+#ifdef DEV_BUILD
+GCLock::State GCLock::isGCEnabled() const
+{
+	if (getSweepCount() || m_relation->isSystem() || m_relation->isTemporary())
+		return State::enabled;
+
+	if (m_flags & GC_disabled)
+		return State::disabled;
+
+	return State::unknown;
+}
+#endif //DEV_BUILD
+
+
+//
+// class RelationPermanent
+//
 
 RelationPermanent::RelationPermanent(thread_db* tdbb, MemoryPool& p, MetaId id, NoData)
 	: PermanentStorage(p),
@@ -196,24 +407,12 @@ int RelationPermanent::partners_ast_relation(void* ast_object)
 	return 0;
 }
 
-
-
 Record* RelationPermanent::getGCRecord(thread_db* tdbb, const Format* const format)
 {
-/**************************************
- *
- *	V I O _ g c _ r e c o r d
- *
- **************************************
- *
- * Functional description
- *	Allocate from a relation's vector of garbage
- *	collect record blocks. Their scope is strictly
- *	limited to temporary usage and should never be
- *	copied to permanent record parameter blocks.
- *
- **************************************/
-	SET_TDBB(tdbb);
+	// Allocate from a relation's vector of garbage collect record blocks.
+ 	// Their scope is strictly limited to temporary usage and should never be
+ 	// copied to permanent record parameter blocks.
+
 	Database* dbb = tdbb->getDatabase();
 	CHECK_DBB(dbb);
 
@@ -274,11 +473,6 @@ bool RelationPermanent::isReplicating(thread_db* tdbb)
 	}
 
 	return oldState == Bool3State::True;
-}
-
-FB_UINT64 jrd_rel::getTempInstanceId(thread_db* tdbb) const
-{
-	return (getPermanent()->rel_flags & REL_temp_frame) ? tdbb->tdbb_temp_frame_id : 0;
 }
 
 RelationPages* RelationPermanent::getTempPages(thread_db* tdbb, RelationPages::InstanceId instanceId, bool allocPages)
@@ -576,7 +770,6 @@ bool RelationPermanent::fillPagesSnapshot(PagesSnapshot& snapshot, const bool at
 	return true;
 }
 
-
 void RelationPermanent::PagesSnapshot::clear()
 {
 #ifdef DEV_BUILD
@@ -594,23 +787,6 @@ void RelationPermanent::PagesSnapshot::clear()
 	}
 
 	inherited::clear();
-}
-
-RelationPages* jrd_rel::getPages(thread_db* tdbb, RelationPages::InstanceId instanceId, bool allocPages)
-{
-	const auto relPages = getBasePages();
-
-	if (!relPages->hasData() || !relPages->hasIndices())
-		DPM_scan_pages(tdbb, rel_perm, relPages);
-
-	Tablespace::lock(tdbb, relPages->getPageSpaceId());
-
-	return rel_perm->useTempPages(tdbb) ? rel_perm->getTempPages(tdbb, instanceId, allocPages) : relPages;
-}
-
-void jrd_rel::deletePages(thread_db* tdbb)
-{
-	DPM_delete_relation(tdbb, rel_perm, getBasePages());
 }
 
 void RelationPermanent::getRelLockKey(thread_db* tdbb, UCHAR* key)
@@ -664,14 +840,12 @@ Cached::Index* RelationPermanent::lookupIndex(thread_db* tdbb, MetaId id, Object
 	return rel_indices.getData(tdbb, id, flags);
 }
 
-
 Cached::Index* RelationPermanent::ensureIndex(thread_db* tdbb, MetaId id)
 {
 	auto* idp = rel_indices.ensurePermanent(tdbb, id);
 	fb_assert(idp);
 	return idp;
 }
-
 
 Cached::Relation* RelationPermanent::newVersion(thread_db* tdbb, const QualifiedName& name)
 {
@@ -695,7 +869,6 @@ Cached::Relation* RelationPermanent::newVersion(thread_db* tdbb, const Qualified
 	return relation;
 }
 
-
 void RelationPermanent::releaseLock(thread_db* tdbb)
 {
 	if (rel_partners_lock)
@@ -707,51 +880,6 @@ void RelationPermanent::releaseLock(thread_db* tdbb)
 	{
 		if (index)
 			index->releaseLocks(tdbb);
-	}
-}
-
-
-IndexVersion::IndexVersion(MemoryPool& p, Cached::Index* idp)
-	: perm(idp)
-{ }
-
-void IndexVersion::destroy(thread_db* tdbb, IndexVersion* idv)
-{
-	delete idv;
-}
-
-ObjectType IndexVersion::objectType() noexcept
-{
-	return obj_index;
-}
-
-
-void jrd_rel::releaseTriggers(thread_db* tdbb, bool destroy)
-{
-	for (int n = 1; n < TRIGGER_MAX; ++n)
-	{
-		rel_triggers[n].release(tdbb, destroy);
-	}
-}
-
-void Triggers::release(thread_db* tdbb, bool destroy)
-{
-/***********************************************
- *
- *      M E T _ r e l e a s e _ t r i g g e r s
- *
- ***********************************************
- *
- * Functional description
- *      Release a possibly null vector of triggers.
- *      If triggers are still active let someone
- *      else do the work.
- *
- **************************************/
-	if (destroy)
-	{
-		Triggers::destroy(tdbb, this);
-		return;
 	}
 }
 
@@ -777,342 +905,24 @@ RelationPages* RelationPermanent::getPages(ULONG pageSpaceId)
 	return rel_pagespaces.back();
 }
 
-void GCLock::blockingAst()
+
+//
+// class jrd_rel
+//
+
+jrd_rel::jrd_rel(MemoryPool& p, Cached::Relation* r)
+	: rel_pool(&p),
+	  rel_perm(r),
+	  rel_view_contexts(p),
+	  rel_triggers(p),
+	  rel_ss_definer(false),
+	  rel_scan_count(0)
+{}
+
+jrd_rel* jrd_rel::create(thread_db* tdbb, MemoryPool& pool, Cached::Relation* rlp)
 {
-	/****
-	 SR - gc forbidden, awaiting moment to re-establish SW lock
-	 SW - gc allowed, usual state
-	 PW - gc allowed to the one connection only
-	****/
-
-	const auto dbb = m_lock->lck_dbb;
-
-	AsyncContextHolder tdbb(dbb, FB_FUNCTION);
-
-	unsigned oldFlags = m_flags.load(std::memory_order_acquire);
-	do
-	{
-		fb_assert(oldFlags & GC_locked);
-		if (!(oldFlags & GC_locked)) // work already done synchronously ?
-			return;
-	} while (!m_flags.compare_exchange_weak(oldFlags, oldFlags | GC_blocking,
-										  std::memory_order_release, std::memory_order_acquire));
-
-	if (oldFlags & GC_counterMask)
-		return;
-
-	if (oldFlags & GC_disabled)
-	{
-		// someone acquired EX lock
-
-		fb_assert(m_lock->lck_id);
-		fb_assert(m_lock->lck_physical == LCK_SR);
-
-		LCK_release(tdbb, m_lock);
-		m_flags.fetch_and(~(GC_disabled | GC_blocking | GC_locked));
-	}
-	else
-	{
-		// someone acquired PW lock
-
-		fb_assert(m_lock->lck_id);
-		fb_assert(m_lock->lck_physical == LCK_SW);
-
-		m_flags.fetch_or(GC_disabled);
-		downgrade(tdbb);
-	}
+	return FB_NEW_POOL(pool) jrd_rel(pool, rlp);
 }
-
-void GCLock::checkGuard(unsigned flags)
-{
-	if (flags & GC_guardBit)
-	{
-		fatal_exception::raiseFmt
-			("Overflow or underflow when changing GC lock atomic counter (guard bit set), flags %08x", flags);
-	}
-}
-
-bool GCLock::acquire(thread_db* tdbb, int wait)
-{
-	unsigned oldFlags = m_flags.load(std::memory_order_acquire);
-	for(;;)
-	{
-		if (oldFlags & (GC_blocking | GC_disabled))		// lock should not be obtained
-			return false;
-
-		const unsigned newFlags = oldFlags + 1;
-		checkGuard(newFlags);
-
-		if (!m_flags.compare_exchange_weak(oldFlags, newFlags, std::memory_order_release, std::memory_order_acquire))
-			continue;
-
-		if (oldFlags & GC_locked)			// lock was already taken when we checked flags
-			return true;
-
-		if (!(oldFlags & GC_counterMask))	// we must take lock
-			break;
-
-		// undefined state - someone else is taking/releasing a lock right now:
-		oldFlags = m_flags.fetch_sub(1, std::memory_order_acquire);	// decrement our lock counter,
-		checkGuard(oldFlags - 1);
-		Thread::yield();											// wait a bit
-		oldFlags = m_flags.load(std::memory_order_acquire);			// and retry
-	}
-
-	// No need to use LM for LTT
-	if (m_relation->isLTT())
-		return true;
-
-	// We incremented counter from 0 to 1 - take care about lck
-	if (!m_lock)
-		m_lock = m_relation->createLock(tdbb, LCK_rel_gc, false);
-
-	fb_assert(!m_lock->lck_id);
-
-	ThreadStatusGuard temp_status(tdbb);
-
-	bool ret;
-	if (oldFlags & GC_disabled)
-		ret = LCK_lock(tdbb, m_lock, LCK_SR, wait);
-	else
-	{
-		ret = LCK_lock(tdbb, m_lock, LCK_SW, wait);
-		if (ret)
-		{
-			m_flags.fetch_or(GC_locked);
-			return true;
-		}
-
-		oldFlags = m_flags.fetch_or(GC_disabled, std::memory_order_seq_cst) | GC_disabled;
-		ret = LCK_lock(tdbb, m_lock, LCK_SR, wait);
-	}
-
-	unsigned newFlags;
-	do
-	{
-		newFlags = oldFlags - 1;
-		checkGuard(newFlags);
-
-		if (!ret)
-			newFlags &= ~GC_disabled;
-
-	} while (!m_flags.compare_exchange_weak(oldFlags, newFlags, std::memory_order_release, std::memory_order_acquire));
-
-	return false;
-}
-
-void GCLock::downgrade(thread_db* tdbb)
-{
-	unsigned oldFlags = m_flags.load(std::memory_order_acquire);
-	unsigned newFlags;
-	do
-	{
-		newFlags = oldFlags - 1;
-		checkGuard(newFlags);
-	} while (!m_flags.compare_exchange_weak(oldFlags, newFlags, std::memory_order_release, std::memory_order_acquire));
-
-	if ((!m_relation->isLTT()) && ((newFlags & GC_counterMask) == 0) && (newFlags & GC_blocking))
-	{
-		fb_assert(newFlags & GC_locked);
-		fb_assert(m_lock->lck_id);
-		fb_assert(m_lock->lck_physical == LCK_SW);
-
-		LCK_downgrade(tdbb, m_lock);
-
-		oldFlags = newFlags;
-		do
-		{
-			newFlags = oldFlags;
-			if (m_lock->lck_physical != LCK_SR)
-			{
-				newFlags &= ~GC_disabled;
-				if (m_lock->lck_physical < LCK_SR)
-					newFlags &= ~GC_locked;
-			}
-			else
-				newFlags |= GC_disabled;
-
-			newFlags &= ~GC_blocking;
-		} while (!m_flags.compare_exchange_weak(oldFlags, newFlags, std::memory_order_release, std::memory_order_acquire));
-	}
-}
-
-// violates rules of atomic counters - ok ONLY for ASSERT
-unsigned GCLock::getSweepCount() const
-{
-	return m_flags.load(std::memory_order_relaxed) & GC_counterMask;
-}
-
-bool GCLock::disable(thread_db* tdbb, int wait, Lock*& tempLock)
-{
-	ThreadStatusGuard temp_status(tdbb);
-
-	// if validation is already running - go out
-	unsigned oldFlags = m_flags.load(std::memory_order_acquire);
-	do {
-		if (oldFlags & GC_disabled)
-			return false;
-	} while (m_flags.compare_exchange_weak(oldFlags, oldFlags | GC_disabled,
-										   std::memory_order_release, std::memory_order_acquire));
-
-	int sleeps = -wait * 10;
-	while (m_flags.load(std::memory_order_relaxed) & GC_counterMask)
-	{
-		EngineCheckout cout(tdbb, FB_FUNCTION);
-		Thread::sleep(100);
-
-		if (wait < 0 && --sleeps == 0)
-			break;
-	}
-
-	if (m_flags.load(std::memory_order_relaxed) & GC_counterMask)
-	{
-		m_flags.fetch_and(~GC_disabled);
-		return false;
-	}
-
-	if (m_relation->isLTT())
-		return true;
-
-	ensureReleased(tdbb);
-
-	// we need no AST here
-	if (!tempLock)
-		tempLock = m_relation->createLock(tdbb, LCK_rel_gc, true);
-
-	const bool ret = LCK_lock(tdbb, tempLock, LCK_PW, wait);
-	if (!ret)
-		m_flags.fetch_and(~GC_disabled);
-
-	return ret;
-}
-
-void GCLock::ensureReleased(thread_db* tdbb)
-{
-	if (!m_lock)
-		return;
-
-	unsigned oldFlags = m_flags.load(std::memory_order_acquire);
-	for (;;)
-	{
-		if (oldFlags & GC_locked)
-		{
-			if (!m_flags.compare_exchange_strong(oldFlags, oldFlags & ~GC_locked,
-											     std::memory_order_release, std::memory_order_acquire))
-			{
-				continue;
-			}
-
-			// exactly one who cleared GC_locked bit releases a lock
-			LCK_release(tdbb, m_lock);
-		}
-
-		return;
-	}
-}
-
-void GCLock::forcedRelease(thread_db* tdbb)
-{
-	m_flags.fetch_and(~GC_locked);
-
-	if (m_lock)
-		LCK_release(tdbb, m_lock);
-}
-
-void GCLock::enable(thread_db* tdbb, Lock* tempLock)
-{
-	if (!(tempLock && tempLock->lck_id))
-		return;
-
-	fb_assert(m_flags.load() & GC_disabled);
-
-	ensureReleased(tdbb);
-
-	LCK_convert(tdbb, tempLock, LCK_EX, LCK_WAIT);
-	m_flags.fetch_and(~GC_disabled);
-
-	LCK_release(tdbb, tempLock);
-}
-
-#ifdef DEV_BUILD
-GCLock::State GCLock::isGCEnabled() const
-{
-	if (getSweepCount() || m_relation->isSystem() || m_relation->isTemporary())
-		return State::enabled;
-
-	if (m_flags & GC_disabled)
-		return State::disabled;
-
-	return State::unknown;
-}
-#endif //DEV_BUILD
-
-
-/// RelationPages
-
-void RelationPages::free(RelationPages*& nextFree)
-{
-	MutexLockGuard guard(m_mutex, FB_FUNCTION);
-
-	reset();
-
-	m_freePages = nextFree;
-	nextFree = this;
-
-	m_dpMap.clear();
-	m_dpMapMark = 0;
-}
-
-
-/// IndexPermanent
-
-[[noreturn]] void IndexPermanent::errIndexGone()
-{
-	fatal_exception::raise("Index is gone unexpectedly");
-}
-
-const QualifiedName& IndexPermanent::getName()
-{
-	static QualifiedName empty("");
-	Cached::Index* element = static_cast<Cached::Index*>(this);
-	auto* v = element->getVersioned(JRD_get_thread_data(), CacheFlag::AUTOCREATE | CacheFlag::MINISCAN);
-	return v ? v->getName() : empty;
-}
-
-FB_UINT64 IndexPermanent::makeLockId(MetaId relId, MetaId indexId)
-{
-	if (MetadataCache::isLTT(relId))
-		return ElementBase::NO_METALOCK;
-
-	const int REL_ID_KEY_OFFSET = 16;
-	return (FB_UINT64(relId) << REL_ID_KEY_OFFSET) + indexId;
-}
-
-void IndexPermanent::releaseStatements(thread_db* tdbb)
-{
-	if (idp_expression_statement)
-	{
-		idp_expression_statement->release(tdbb);
-		idp_expression_statement = nullptr;
-		idp_expression = nullptr;
-	}
-	if (idp_condition_statement)
-	{
-		idp_condition_statement->release(tdbb);
-		idp_condition_statement = nullptr;
-		idp_condition = nullptr;
-	}
-}
-
-void IndexPermanent::reloadAst(thread_db* tdbb, TraNumber tran, bool erase)
-{
-	// we need to special handle temp tables with ON PRESERVE ROWS only
-	if (erase && (idp_relation->rel_flags & REL_temp_conn))
-		IDX_mark_temp(tdbb, idp_relation, idp_id, nullptr, tran);
-}
-
-
-/// jrd_rel
 
 void jrd_rel::destroy(thread_db* tdbb, jrd_rel* rel)
 {
@@ -1120,9 +930,32 @@ void jrd_rel::destroy(thread_db* tdbb, jrd_rel* rel)
 	delete rel;
 }
 
-jrd_rel* jrd_rel::create(thread_db* tdbb, MemoryPool& pool, Cached::Relation* rlp)
+FB_UINT64 jrd_rel::getTempInstanceId(thread_db* tdbb) const
 {
-	return FB_NEW_POOL(pool) jrd_rel(pool, rlp);
+	return (getPermanent()->rel_flags & REL_temp_frame) ? tdbb->tdbb_temp_frame_id : 0;
+}
+
+void jrd_rel::releaseTriggers(thread_db* tdbb, bool destroy)
+{
+	for (int n = 1; n < TRIGGER_MAX; ++n)
+		rel_triggers[n].release(tdbb, destroy);
+}
+
+RelationPages* jrd_rel::getPages(thread_db* tdbb, RelationPages::InstanceId instanceId, bool allocPages)
+{
+	const auto relPages = getBasePages();
+
+	if (!relPages->hasData() || !relPages->hasIndices())
+		DPM_scan_pages(tdbb, rel_perm, relPages);
+
+	Tablespace::lock(tdbb, relPages->getPageSpaceId());
+
+	return rel_perm->useTempPages(tdbb) ? rel_perm->getTempPages(tdbb, instanceId, allocPages) : relPages;
+}
+
+void jrd_rel::deletePages(thread_db* tdbb)
+{
+	DPM_delete_relation(tdbb, rel_perm, getBasePages());
 }
 
 const char* jrd_rel::objectFamily(RelationPermanent* perm)
@@ -1137,17 +970,8 @@ ObjectType jrd_rel::objectType() noexcept
 
 const Format* jrd_rel::currentFormat(thread_db* tdbb)
 {
-/**************************************
- *
- *      M E T _ c u r r e n t
- *
- **************************************
- *
- * Functional description
- *      Get the current format for a relation.  The current format is the
- *      format in which new records are to be stored.
- *
- **************************************/
+	// Get the current format for a relation. The current format is the format
+ 	// in which new records are to be stored.
 
 	// dimitr:	rel_current_format may sometimes get out of sync,
 	//			e.g. after DFW error raised during ALTER TABLE command.
@@ -1196,20 +1020,59 @@ const Trigger* jrd_rel::findTrigger(const QualifiedName& trig_name) const
 }
 
 
-// class Triggers
+//
+// class IndexPermanent
+//
 
-void Triggers::destroy(thread_db* tdbb, Triggers* trigs)
+[[noreturn]] void IndexPermanent::errIndexGone()
 {
-	for (auto t : trigs->triggers)
+	fatal_exception::raise("Index is gone unexpectedly");
+}
+
+const QualifiedName& IndexPermanent::getName()
+{
+	static QualifiedName empty("");
+	Cached::Index* element = static_cast<Cached::Index*>(this);
+	auto* v = element->getVersioned(JRD_get_thread_data(), CacheFlag::AUTOCREATE | CacheFlag::MINISCAN);
+	return v ? v->getName() : empty;
+}
+
+FB_UINT64 IndexPermanent::makeLockId(MetaId relId, MetaId indexId)
+{
+	if (MetadataCache::isLTT(relId))
+		return ElementBase::NO_METALOCK;
+
+	const int REL_ID_KEY_OFFSET = 16;
+	return (FB_UINT64(relId) << REL_ID_KEY_OFFSET) + indexId;
+}
+
+void IndexPermanent::releaseStatements(thread_db* tdbb)
+{
+	if (idp_expression_statement)
 	{
-		t->free(tdbb);
-		delete t;
+		idp_expression_statement->release(tdbb);
+		idp_expression_statement = nullptr;
+		idp_expression = nullptr;
 	}
-	trigs->triggers.clear();
+	if (idp_condition_statement)
+	{
+		idp_condition_statement->release(tdbb);
+		idp_condition_statement = nullptr;
+		idp_condition = nullptr;
+	}
+}
+
+void IndexPermanent::reloadAst(thread_db* tdbb, TraNumber tran, bool erase)
+{
+	// we need to special handle temp tables with ON PRESERVE ROWS only
+	if (erase && (idp_relation->rel_flags & REL_temp_conn))
+		IDX_mark_temp(tdbb, idp_relation, idp_id, nullptr, tran);
 }
 
 
+//
 // class Trigger
+//
 
 void Trigger::free(thread_db* tdbb)
 {
@@ -1225,7 +1088,101 @@ void Trigger::free(thread_db* tdbb)
 }
 
 
+//
+// class Triggers
+//
+
+void Triggers::release(thread_db* tdbb, bool destroy)
+{
+	// Release a possibly null vector of triggers.
+ 	// If triggers are still active let someone else do the work.
+
+	if (destroy)
+	{
+		Triggers::destroy(tdbb, this);
+		return;
+	}
+}
+
+void Triggers::destroy(thread_db* tdbb, Triggers* trigs)
+{
+	for (auto t : trigs->triggers)
+	{
+		t->free(tdbb);
+		delete t;
+	}
+
+	trigs->triggers.clear();
+}
+
+
+//
+// class TrigArray
+//
+
+TrigArray::TrigArray(MemoryPool& p)
+	: preErase(p), postErase(p), preModify(p),
+	  postModify(p), preStore(p), postStore(p)
+{ }
+
+Triggers& TrigArray::operator[](int t)
+{
+	switch(t)
+	{
+	case TRIGGER_PRE_STORE:
+		return preStore;
+
+	case TRIGGER_POST_STORE:
+		return postStore;
+
+	case TRIGGER_PRE_MODIFY:
+		return preModify;
+
+	case TRIGGER_POST_MODIFY:
+		return postModify;
+
+	case TRIGGER_PRE_ERASE:
+		return preErase;
+
+	case TRIGGER_POST_ERASE:
+		return postErase;
+	}
+
+	fb_assert(false);
+	fatal_exception::raise("Invalid trigger type");
+}
+
+const Triggers& TrigArray::operator[](int t) const
+{
+	switch(t)
+	{
+	case TRIGGER_PRE_STORE:
+		return preStore;
+
+	case TRIGGER_POST_STORE:
+		return postStore;
+
+	case TRIGGER_PRE_MODIFY:
+		return preModify;
+
+	case TRIGGER_POST_MODIFY:
+		return postModify;
+
+	case TRIGGER_PRE_ERASE:
+		return preErase;
+
+	case TRIGGER_POST_ERASE:
+		return postErase;
+	}
+
+	fb_assert(false);
+	fatal_exception::raise("Invalid trigger type");
+}
+
+
+//
 // class DbTriggers
+//
 
 DbTriggersHeader::DbTriggersHeader(thread_db* tdbb, MemoryPool& p, MetaId& t, NoData)
 	: Firebird::PermanentStorage(p),
