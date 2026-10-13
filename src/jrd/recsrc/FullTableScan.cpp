@@ -59,7 +59,7 @@ void FullTableScan::internalOpen(thread_db* tdbb) const
 
 	const auto transaction = m_relation()->isLTT() ? tdbb->getTransaction() : request->req_transaction;
 	const auto relation = m_relation(tdbb);
-	RLCK_reserve_relation(tdbb, transaction, relation, false);
+	RLCK_reserve_relation(tdbb, transaction, m_relation(), false);
 
 	record_param* const rpb = &request->req_rpb[m_stream];
 	rpb->getWindow(tdbb).win_flags = 0;

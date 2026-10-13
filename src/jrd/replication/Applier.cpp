@@ -1224,7 +1224,7 @@ void Applier::doInsert(thread_db* tdbb, record_param* rpb, jrd_tra* transaction)
 	const auto format = record->getFormat();
 	const auto relation = rpb->rpb_relation;
 
-	RLCK_reserve_relation(tdbb, transaction, relation, true);
+	RLCK_reserve_relation(tdbb, transaction, relation->getPermanent(), true);
 
 	for (USHORT id = 0; id < format->fmt_count; id++)
 	{
@@ -1310,7 +1310,7 @@ void Applier::doUpdate(thread_db* tdbb, record_param* orgRpb, record_param* newR
 	const auto format = newRecord->getFormat();
 	const auto relation = newRpb->rpb_relation;
 
-	RLCK_reserve_relation(tdbb, transaction, relation, true);
+	RLCK_reserve_relation(tdbb, transaction, relation->getPermanent(), true);
 
 	for (USHORT id = 0; id < format->fmt_count; id++)
 	{
@@ -1403,7 +1403,7 @@ void Applier::doDelete(thread_db* tdbb, record_param* rpb, jrd_tra* transaction)
 {
 	fb_assert(!(transaction->tra_flags & TRA_system));
 
-	RLCK_reserve_relation(tdbb, transaction, rpb->rpb_relation, true);
+	RLCK_reserve_relation(tdbb, transaction, rpb->rpb_relation->getPermanent(), true);
 
 	Savepoint::ChangeMarker marker(transaction->tra_save_point);
 

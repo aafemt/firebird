@@ -288,7 +288,7 @@ public:
 	IdxCreationHelper(thread_db* tdbb, IndexCreation& creation) :
 		m_tdbb(tdbb),
 		m_creation(creation),
-		m_gcLock(tdbb, m_creation.relation),
+		m_gcLock(tdbb, m_creation.relation->getPermanent()),
 		m_protectRelations(tdbb, m_creation.transaction)
 	{
 		m_creation.helper = this;
@@ -313,7 +313,7 @@ public:
 	{
 		const auto transaction = m_creation.transaction;
 
-		m_protectRelations.addRelation(m_creation.relation);
+		m_protectRelations.addRelation(m_creation.relation->getPermanent());
 
 		if (!lockWrites(transaction->getLockWait()))
 			status_exception::raise(Arg::Gds(isc_lock_timeout) << Arg::Str(m_creation.index_name.toQuotedString()));	// error message
@@ -820,7 +820,7 @@ bool IndexCreateTask::handler(WorkItem& _item)
 		// If there are any back-versions left make an attempt at intermediate GC.
 		if (primary.rpb_b_page)
 		{
-			GCLock::Shared gcGuard(tdbb, relation);
+			GCLock::Shared gcGuard(tdbb, relation->getPermanent());
 			if (!(attachment->att_flags & ATT_no_cleanup) && gcGuard.gcEnabled())
 			{
 				VIO_intermediate_gc(tdbb, &primary, transaction);

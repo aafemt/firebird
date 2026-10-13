@@ -52,7 +52,7 @@ public:
 	{
 	}
 
-	ProtectRelations(thread_db* tdbb, jrd_tra* transaction, jrd_rel* relation, bool autoRelease = true) :
+	ProtectRelations(thread_db* tdbb, jrd_tra* transaction, Cached::Relation* relation, bool autoRelease = true) :
 		m_tdbb(tdbb),
 		m_transaction(transaction),
 		m_release(autoRelease),
@@ -68,9 +68,9 @@ public:
 			unlock();
 	}
 
-	void addRelation(jrd_rel* relation)
+	void addRelation(Cached::Relation* relation)
 	{
-		if (!(relation->getPermanent()->rel_flags & REL_temp_ltt))
+		if (!(relation->rel_flags & REL_temp_ltt))
 		{
 			FB_SIZE_T pos;
 			if (!m_locks.find(relation->getId(), pos))
@@ -98,7 +98,7 @@ public:
 private:
 	struct RelationLock
 	{
-		RelationLock(jrd_rel* relation = nullptr) :
+		RelationLock(Cached::Relation* relation = nullptr) :
 			m_relation(relation),
 			m_lock(nullptr),
 			m_level(LCK_none)
@@ -113,10 +113,10 @@ private:
 			return item.m_relation->getId();
 		}
 
-		jrd_rel* m_relation;
+		Cached::Relation* m_relation;
 		Lock* m_lock;
 		UCHAR m_level;		// original lock level
-};
+	};
 
 	thread_db* const m_tdbb;
 	jrd_tra* const m_transaction;

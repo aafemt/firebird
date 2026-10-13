@@ -10927,10 +10927,10 @@ void AlterRelationNode::execute(thread_db* tdbb, DsqlCompilerScratch* dsqlScratc
 
 			// Protect relation from modification to create a consistent table copy.
 			// The lock is held until the transaction end.
-			ProtectRelations protectRelations(tdbb, transaction, rel, false);
+			ProtectRelations protectRelations(tdbb, transaction, newRel, false);
 
 			// Disable GC during page copying
-			GCLock::Exclusive gcLock(tdbb, rel);
+			GCLock::Exclusive gcLock(tdbb, newRel);
 			gcLock.acquire(transaction->getLockWait() != 0);
 
 			// Copy pages to the new tablespace
@@ -12155,19 +12155,19 @@ void DropRelationNode::execute(thread_db* tdbb, DsqlCompilerScratch* dsqlScratch
 		{
 			fb_assert(relPerm->isDropped());
 
-			if (!relation->rel_gc_lock.getSweepCount())
+			if (!relPerm->rel_gc_lock.getSweepCount())
 				break;
 
 			EngineCheckout cout(tdbb, FB_FUNCTION);
 			Thread::sleep(1 * 1000);
 		}
 
-		if (relation->rel_gc_lock.getSweepCount())
-			DFW_raiseRelationInUseError(relation);
+		if (relPerm->rel_gc_lock.getSweepCount())
+			DFW_raiseRelationInUseError(relPerm);
 
 		// Free any memory associated with the relation's garbage collection bitmap
 		if (dbb->dbb_garbage_collector)
-			dbb->dbb_garbage_collector->removeRelation(relation->getId());
+			dbb->dbb_garbage_collector->removeRelation(relPerm->getId());
 
 		const auto relPages = relation->getBasePages();
 
@@ -13526,9 +13526,9 @@ MetaId StoreIndexNode::create(thread_db* tdbb, jrd_tra* transaction)
 
 	// Protect relation from modification to create consistent index
 	ProtectRelations protectRelations(tdbb, transaction);
-	protectRelations.addRelation(relation);
+	protectRelations.addRelation(indexRelation);
 
-	jrd_rel* partnerRelation = nullptr;
+	Cached::Relation* partnerRelation = nullptr;
 	if (idx.idx_flags & idx_foreign)
 	{
 		fb_assert(!concurrently);
@@ -13536,9 +13536,7 @@ MetaId StoreIndexNode::create(thread_db* tdbb, jrd_tra* transaction)
 		idx.idx_id = idx_invalid;
 
 		if (MET_lookup_partner(tdbb, indexRelation, &idx, indexName))
-		{
-			partnerRelation = MetadataCache::getVersioned<Cached::Relation>(tdbb, idx.idx_primary_relation, CacheFlag::AUTOCREATE);
-		}
+			partnerRelation = MetadataCache::getPerm<Cached::Relation>(tdbb, idx.idx_primary_relation, CacheFlag::AUTOCREATE);
 
 		if (!partnerRelation)
 		{
@@ -13553,11 +13551,14 @@ MetaId StoreIndexNode::create(thread_db* tdbb, jrd_tra* transaction)
 
 		protectRelations.addRelation(partnerRelation);
 
-		int bad_segment;
-		if (!IDX_check_master_types(tdbb, idx, partnerRelation, bad_segment))
+		if (const auto relVer = partnerRelation->getVersioned(tdbb, idx.idx_primary_relation, CacheFlag::AUTOCREATE))
 		{
-			ERR_post(Arg::Gds(isc_no_meta_update) <<
-					 Arg::Gds(isc_partner_idx_incompat_type) << Arg::Num(bad_segment + 1));
+			int bad_segment;
+			if (!IDX_check_master_types(tdbb, idx, relVer, bad_segment))
+			{
+				ERR_post(Arg::Gds(isc_no_meta_update) <<
+						Arg::Gds(isc_partner_idx_incompat_type) << Arg::Num(bad_segment + 1));
+			}
 		}
 	}
 
@@ -13592,8 +13593,8 @@ MetaId StoreIndexNode::create(thread_db* tdbb, jrd_tra* transaction)
 	{
 		indexRelation->checkPartners(tdbb);
 
-		if (indexRelation != partnerRelation->getPermanent())
-			partnerRelation->getPermanent()->checkPartners(tdbb);
+		if (indexRelation != partnerRelation)
+			partnerRelation->checkPartners(tdbb);
 	}
 
 	return idxId;
@@ -13754,7 +13755,7 @@ MetaId StoreIndexNode::createExpression(thread_db* tdbb, jrd_tra* transaction)
 		ProtectRelations protectRelation(tdbb, transaction);
 		if (!concurrently)
 		{
-			protectRelation.addRelation(relation);
+			protectRelation.addRelation(indexRelation);
 			protectRelation.lock();
 		}
 
@@ -14739,10 +14740,10 @@ void AlterIndexNode::step2(thread_db* tdbb, jrd_tra* transaction)
 
 			// Protect relation from modification to create a consistent index copy.
 			// The lock is held until the transaction end.
-			ProtectRelations protectRelations(tdbb, transaction, relation, false);
+			ProtectRelations protectRelations(tdbb, transaction, indexRelation, false);
 
 			// Disable GC during page copying
-			GCLock::Exclusive gcLock(tdbb, relation);
+			GCLock::Exclusive gcLock(tdbb, indexRelation);
 			gcLock.acquire(transaction->getLockWait() != 0);
 
 			BTR_copy_index(tdbb, relation, idxId.value(), newPageSpaceId);

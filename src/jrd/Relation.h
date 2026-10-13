@@ -27,6 +27,7 @@
 #include "../jrd/btr.h"
 #include "../jrd/lck.h"
 #include "../jrd/pag.h"
+#include "../jrd/tdbb.h"
 #include "../jrd/val.h"
 #include "../jrd/Attachment.h"
 #include "../jrd/CacheVector.h"
@@ -847,7 +848,7 @@ private:
 class GCLock
 {
 public:
-	explicit GCLock(jrd_rel* relation)
+	explicit GCLock(RelationPermanent* relation)
 		: m_relation(relation)
 	{}
 
@@ -856,7 +857,7 @@ public:
 	class Shared
 	{
 	public:
-		Shared(thread_db* tdbb, jrd_rel* relation);
+		Shared(thread_db* tdbb, RelationPermanent* relation);
 		~Shared();
 
 		bool gcEnabled() const
@@ -866,7 +867,7 @@ public:
 
 	private:
 		thread_db* const m_tdbb;
-		jrd_rel* const m_relation;
+		RelationPermanent* const m_relation;
 		bool m_gcEnabled;
 	};
 
@@ -875,7 +876,7 @@ public:
 	class Exclusive
 	{
 	public:
-		Exclusive(thread_db* tdbb, jrd_rel* relation)
+		Exclusive(thread_db* tdbb, RelationPermanent* relation)
 			: m_tdbb(tdbb), m_relation(relation)
 		{}
 
@@ -890,7 +891,7 @@ public:
 
 	private:
 		thread_db* const m_tdbb;
-		jrd_rel* const m_relation;
+		RelationPermanent* const m_relation;
 		Lock* m_lock = nullptr;
 	};
 
@@ -939,7 +940,7 @@ private:
 
 private:
 	Firebird::AutoPtr<Lock> m_lock;
-	jrd_rel* const m_relation;
+	RelationPermanent* const m_relation;
 	std::atomic<unsigned> m_flags = 0;
 
 	static constexpr unsigned GC_counterMask =	0x0FFFFFFF;
@@ -983,8 +984,28 @@ public:
 			dropTempPages(tdbb);
 	}
 
-	// void makeLocks(thread_db* tdbb, Cached::Relation* relation);		// hvlad: not implemented
-	static constexpr USHORT getRelLockKeyLength() noexcept;
+	bool useTempPages(thread_db* tdbb) const
+	{
+		return (isTemporary() && !(tdbb->tdbb_flags & TDBB_use_db_page_space));
+	}
+
+	RelationPages::InstanceId getInstanceId(thread_db* tdbb)
+	{
+		if (useTempPages(tdbb))
+		{
+			const auto relPages = getTempPages(tdbb, MAX_TRA_NUMBER, true);
+			return relPages->getInstanceId();
+		}
+
+		return 0;
+	}
+
+	static constexpr USHORT getRelLockKeyLength() noexcept
+	{
+		return sizeof(ULONG) + sizeof(RelationPages::InstanceId);
+	}
+
+	void getRelLockKey(thread_db* tdbb, UCHAR* key);
 	Lock* createLock(thread_db* tdbb, lck_t, bool);
 	Lock* createLock(thread_db* tdbb, MemoryPool& pool, lck_t, bool);
 
@@ -1175,8 +1196,10 @@ public:
 	QualifiedName rel_security_name;	// security class name for relation
 	std::atomic<ULONG> rel_flags;		// flags
 
+	GCLock rel_gc_lock;					// garbage collection lock
+
 	enum class Bool3State {Unknown, False, True};
-	std::atomic<Bool3State>	rel_repl_state;			// replication state
+	std::atomic<Bool3State>	rel_repl_state;		// replication state
 
 	PrimaryDeps* rel_primary_dpnds = nullptr;	// foreign dependencies on this relation's primary key
 	ForeignRefs* rel_foreign_refs = nullptr;	// foreign references to other relations' primary keys
@@ -1249,8 +1272,6 @@ public:
 	Firebird::TriState	rel_ss_definer;
 
 	std::atomic<SSHORT> rel_scan_count;		// concurrent sequential scan count
-
-	GCLock rel_gc_lock;						// garbage collection lock
 
 	bool hasData() const
 	{
@@ -1388,12 +1409,6 @@ public:
 		return relPages->getIndexRootPage();
 	}
 
-	void getRelLockKey(thread_db* tdbb, UCHAR* key);
-	static constexpr USHORT getRelLockKeyLength() noexcept;
-
-	Lock* createLock(thread_db* tdbb, lck_t, bool);
-	Lock* createLock(thread_db* tdbb, MemoryPool& pool, lck_t, bool);
-
 	bool hash(thread_db* tdbb, Firebird::sha512& digest);
 
 	static const char* objectFamily(RelationPermanent* perm);
@@ -1416,7 +1431,7 @@ private:
 
 /// class GCLock::Shared
 
-inline GCLock::Shared::Shared(thread_db* tdbb, jrd_rel* relation)
+inline GCLock::Shared::Shared(thread_db* tdbb, RelationPermanent* relation)
 	: m_tdbb(tdbb),
 	  m_relation(relation),
 	  m_gcEnabled(m_relation->rel_gc_lock.acquire(m_tdbb, LCK_NO_WAIT))

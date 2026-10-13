@@ -69,7 +69,7 @@ void IndexTableScan::internalOpen(thread_db* tdbb) const
 	impure->irsb_flags = irsb_first | irsb_open;
 
 	const auto transaction = m_relation()->isLTT() ? tdbb->getTransaction() : request->req_transaction;
-	RLCK_reserve_relation(tdbb, transaction, m_relation(tdbb), false);
+	RLCK_reserve_relation(tdbb, transaction, m_relation(), false);
 
 	record_param* const rpb = &request->req_rpb[m_stream];
 	rpb->rpb_number.setValue(BOF_NUMBER);

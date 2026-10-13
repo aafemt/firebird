@@ -505,7 +505,7 @@ static void raiseObjectInUseError(const string& obj_type, const QualifiedName& o
 			 Arg::Gds(isc_obj_in_use) << name);
 }
 
-void DFW_raiseRelationInUseError(const jrd_rel* relation)
+void DFW_raiseRelationInUseError(const RelationPermanent* relation)
 {
 	const string obj_type = relation->isView() ? "VIEW" : "TABLE";
 
@@ -2779,7 +2779,7 @@ void DFW_reset_icu(thread_db* tdbb)
 
 				if (!tables.exists(rel_id))
 				{
-					if (const auto relation = MetadataCache::getVersioned<Cached::Relation>(tdbb, rel_id, CacheFlag::AUTOCREATE))
+					if (const auto relation = MetadataCache::getPerm<Cached::Relation>(tdbb, rel_id, CacheFlag::AUTOCREATE))
 						tables.addRelation(relation);
 				}
 			}

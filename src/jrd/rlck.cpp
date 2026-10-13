@@ -35,7 +35,7 @@
 using namespace Jrd;
 using namespace Firebird;
 
-Lock* RLCK_reserve_relation(thread_db* tdbb, jrd_tra* transaction, jrd_rel* relation, bool write_flag)
+Lock* RLCK_reserve_relation(thread_db* tdbb, jrd_tra* transaction, Cached::Relation* relation, bool write_flag)
 {
 /**************************************
  *
@@ -60,7 +60,7 @@ Lock* RLCK_reserve_relation(thread_db* tdbb, jrd_tra* transaction, jrd_rel* rela
 	{
 		// In read-only databases, only GTTs with ON COMMIT DELETE ROWS clause are writable
 
-		if (dbb->readOnly() && !(relation->getPermanent()->rel_flags & REL_temp_tran))
+		if (dbb->readOnly() && !(relation->rel_flags & REL_temp_tran))
 			ERR_post(Arg::Gds(isc_read_only_database));
 
 		// No other limitations for GTTs
@@ -133,7 +133,7 @@ Lock* RLCK_reserve_relation(thread_db* tdbb, jrd_tra* transaction, jrd_rel* rela
 }
 
 
-Lock* RLCK_transaction_relation_lock(thread_db* tdbb, jrd_tra* transaction, jrd_rel* relation)
+Lock* RLCK_transaction_relation_lock(thread_db* tdbb, jrd_tra* transaction, Cached::Relation* relation)
 {
 /**************************************
  *

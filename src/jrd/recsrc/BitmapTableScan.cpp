@@ -56,7 +56,7 @@ void BitmapTableScan::internalOpen(thread_db* tdbb) const
 	impure->irsb_bitmap = EVL_bitmap(tdbb, m_inversion, NULL);
 
 	const auto transaction = m_relation()->isLTT() ? tdbb->getTransaction() : request->req_transaction;
-	RLCK_reserve_relation(tdbb, transaction, m_relation(tdbb), false);
+	RLCK_reserve_relation(tdbb, transaction, m_relation(), false);
 
 	record_param* const rpb = &request->req_rpb[m_stream];
 	rpb->rpb_number.setValue(BOF_NUMBER);

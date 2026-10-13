@@ -434,17 +434,18 @@ bool SweepTask::handler(WorkItem& _item)
 		Database* dbb = tdbb->getDatabase();
 
 		relation = MetadataCache::getVersioned<Cached::Relation>(tdbb, relInfo->rel_id, CacheFlag::AUTOCREATE);
+		const auto relPerm = relation->getPermanent();
 
 		if (relation &&
-			!getPermanent(relation)->isDropped() &&
-			!relation->isTemporary() &&
+			!relPerm->isDropped() &&
+			!relPerm->isTemporary() &&
 			relation->getPages(tdbb)->hasData())
 		{
-			GCLock::Shared gcGuard(tdbb, relation);
+			GCLock::Shared gcGuard(tdbb, relPerm);
 			if (!gcGuard.gcEnabled())
 			{
 				string str;
-				str.printf("Acquire garbage collection lock failed (%s)", relation->getName().toQuotedString().c_str());
+				str.printf("Acquire garbage collection lock failed (%s)", relPerm->getName().toQuotedString().c_str());
 				status_exception::raise(Arg::Gds(isc_random) << Arg::Str(str));
 			}
 
@@ -470,7 +471,7 @@ bool SweepTask::handler(WorkItem& _item)
 			{
 				CCH_RELEASE(tdbb, &rpb.getWindow(tdbb));
 
-				if (getPermanent(relation)->isDropped())
+				if (relPerm->isDropped())
 					break;
 
 				if (rpb.rpb_number >= lastRecNo)
@@ -628,7 +629,7 @@ static bool assert_gc_enabled(const jrd_tra* transaction, const jrd_rel* relatio
  *  in this case online validation is not run against given relation.
  *
  **************************************/
-	switch (relation->rel_gc_lock.isGCEnabled())
+	switch (relation->getPermanent()->rel_gc_lock.isGCEnabled())
 	{
 	case GCLock::State::enabled:
 		return true;
@@ -1274,7 +1275,7 @@ bool VIO_chase_record_version(thread_db* tdbb, record_param* rpb,
 			 ((tdbb->tdbb_flags & TDBB_sweeper) && state == tra_committed &&
 				rpb->rpb_b_page != 0 && rpb->rpb_transaction_nr >= oldest_snapshot)))
 		{
-			GCLock::Shared gcGuard(tdbb, rpb->rpb_relation);
+			GCLock::Shared gcGuard(tdbb, rpb->rpb_relation->getPermanent());
 
 			int_gc_done = true;
 			if (gcGuard.gcEnabled())
@@ -1386,7 +1387,7 @@ bool VIO_chase_record_version(thread_db* tdbb, record_param* rpb,
 
 		case tra_precommitted:
 			{	// scope
-			GCLock::Shared gcGuard(tdbb, rpb->rpb_relation);
+			GCLock::Shared gcGuard(tdbb, rpb->rpb_relation->getPermanent());
 
 			if ((attachment->att_flags & ATT_NO_CLEANUP) || !gcGuard.gcEnabled() ||
 				(rpb->rpb_flags & (rpb_chained | rpb_gc_active)))
@@ -1642,7 +1643,7 @@ bool VIO_chase_record_version(thread_db* tdbb, record_param* rpb,
 					{
 						CCH_RELEASE(tdbb, &rpb->getWindow(tdbb));
 
-						GCLock::Shared gcGuard(tdbb, rpb->rpb_relation);
+						GCLock::Shared gcGuard(tdbb, rpb->rpb_relation->getPermanent());
 
 						if (!gcGuard.gcEnabled())
 							return false;
@@ -1690,7 +1691,7 @@ bool VIO_chase_record_version(thread_db* tdbb, record_param* rpb,
 			}
 
 			{ // scope
-				GCLock::Shared gcGuard(tdbb, rpb->rpb_relation);
+				GCLock::Shared gcGuard(tdbb, rpb->rpb_relation->getPermanent());
 
 				if (!gcGuard.gcEnabled())
 					return true;
@@ -2500,7 +2501,7 @@ bool VIO_erase(thread_db* tdbb, record_param* rpb, jrd_tra* transaction)
 	if (backVersion && !(tdbb->getAttachment()->att_flags & ATT_no_cleanup) &&
 		(dbb->dbb_flags & DBB_gc_cooperative))
 	{
-		GCLock::Shared gcGuard(tdbb, rpb->rpb_relation);
+		GCLock::Shared gcGuard(tdbb, rpb->rpb_relation->getPermanent());
 		if (gcGuard.gcEnabled())
 		{
 			temp = *rpb;
@@ -2864,7 +2865,7 @@ bool VIO_garbage_collect(thread_db* tdbb, record_param* rpb, jrd_tra* transactio
 		rpb->rpb_f_page, rpb->rpb_f_line);
 #endif
 
-	GCLock::Shared gcGuard(tdbb, rpb->rpb_relation);
+	GCLock::Shared gcGuard(tdbb, rpb->rpb_relation->getPermanent());
 
 	if ((attachment->att_flags & ATT_no_cleanup) || !gcGuard.gcEnabled())
 		return true;
@@ -3104,7 +3105,7 @@ bool VIO_get_current(thread_db* tdbb,
 			//	return !foreign_key;
 
 			{
-				GCLock::Shared gcGuard(tdbb, rpb->rpb_relation);
+				GCLock::Shared gcGuard(tdbb, rpb->rpb_relation->getPermanent());
 
 				if (!gcGuard.gcEnabled())
 					return !foreign_key;
@@ -3202,7 +3203,7 @@ bool VIO_get_current(thread_db* tdbb,
 			//	return !foreign_key;
 
 			{
-				GCLock::Shared gcGuard(tdbb, rpb->rpb_relation);
+				GCLock::Shared gcGuard(tdbb, rpb->rpb_relation->getPermanent());
 
 				if (!gcGuard.gcEnabled())
 					return !foreign_key;
@@ -3902,7 +3903,7 @@ bool VIO_modify(thread_db* tdbb, record_param* org_rpb, record_param* new_rpb, j
 	if (backVersion && !(tdbb->getAttachment()->att_flags & ATT_no_cleanup) &&
 		(dbb->dbb_flags & DBB_gc_cooperative))
 	{
-		GCLock::Shared gcGuard(tdbb, org_rpb->rpb_relation);
+		GCLock::Shared gcGuard(tdbb, org_rpb->rpb_relation->getPermanent());
 		if (gcGuard.gcEnabled())
 		{
 			temp.rpb_number = org_rpb->rpb_number;
@@ -4891,13 +4892,14 @@ bool VIO_sweep(thread_db* tdbb, jrd_tra* transaction, TraceSweepEvent* traceSwee
 		for (FB_SIZE_T i = 1; i < mdc->relCount(); i++)
 		{
 			relation = MetadataCache::getVersioned<Cached::Relation>(tdbb, i, CacheFlag::AUTOCREATE);
+			const auto relPerm = relation->getPermanent();
 
 			if (relation &&
-				!(relation->getPermanent()->isDropped()) &&
-				!relation->isTemporary() &&
+				!relPerm->isDropped() &&
+				!relPerm->isTemporary() &&
 				relation->getPages(tdbb)->hasData())
 			{
-				GCLock::Shared gcGuard(tdbb, relation);
+				GCLock::Shared gcGuard(tdbb, relPerm);
 				if (!gcGuard.gcEnabled())
 				{
 					ret = false;
@@ -4918,7 +4920,7 @@ bool VIO_sweep(thread_db* tdbb, jrd_tra* transaction, TraceSweepEvent* traceSwee
 				{
 					CCH_RELEASE(tdbb, &rpb.getWindow(tdbb));
 
-					if (relation->getPermanent()->isDropped())
+					if (relPerm->isDropped())
 						break;
 
 					JRD_reschedule(tdbb);
@@ -5123,7 +5125,7 @@ WriteLockResult VIO_writelock(thread_db* tdbb, record_param* org_rpb, jrd_tra* t
 	if (backVersion && !(tdbb->getAttachment()->att_flags & ATT_no_cleanup) &&
 		(dbb->dbb_flags & DBB_gc_cooperative))
 	{
-		GCLock::Shared gcGuard(tdbb, org_rpb->rpb_relation);
+		GCLock::Shared gcGuard(tdbb, org_rpb->rpb_relation->getPermanent());
 		if (gcGuard.gcEnabled())
 		{
 			temp.rpb_number = org_rpb->rpb_number;
@@ -5835,7 +5837,9 @@ void Database::garbage_collector(Database* dbb)
 					(gc_bitmap = gc->getPages(dbb->dbb_oldest_snapshot, relID)))
 				{
 					relation = MetadataCache::getVersioned<Cached::Relation>(tdbb, relID, CacheFlag::AUTOCREATE);
-					if (!relation || getPermanent(relation)->isDropped())
+					const auto relPerm = relation->getPermanent();
+
+					if (!relation || relPerm->isDropped())
 					{
 						delete gc_bitmap;
 						gc_bitmap = NULL;
@@ -5844,7 +5848,7 @@ void Database::garbage_collector(Database* dbb)
 
 					if (gc_bitmap)
 					{
-						GCLock::Shared gcGuard(tdbb, relation);
+						GCLock::Shared gcGuard(tdbb, relPerm);
 						if (!gcGuard.gcEnabled())
 							continue;
 
@@ -5894,13 +5898,13 @@ void Database::garbage_collector(Database* dbb)
 									break;
 								}
 
-								if (getPermanent(relation)->isDropped())
+								if (relPerm->isDropped())
 								{
 									rel_exit = true;
 									break;
 								}
 
-								if (relation->rel_gc_lock.checkDisabled())
+								if (relPerm->rel_gc_lock.checkDisabled())
 								{
 									rel_exit = true;
 									break;

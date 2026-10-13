@@ -3134,11 +3134,12 @@ Validation::RTN Validation::walk_relation(jrd_rel* relation)
  *	Walk all pages associated with a given relation.
  *
  **************************************/
+	const auto relPerm = relation->getPermanent();
 
 	try {
 
 	// skip deleted relations
-	if (getPermanent(relation)->isDropped())
+	if (relPerm->isDropped())
 		return rtn_ok;
 
 #ifdef DEBUG_VAL_VERBOSE
@@ -3150,15 +3151,15 @@ Validation::RTN Validation::walk_relation(jrd_rel* relation)
 
 	// If it's a view, external file or virtual table, skip this
 
-	if (relation->isView() || relation->getExtFile() || relation->isVirtual())
+	if (relPerm->isView() || relPerm->getExtFile() || relPerm->isVirtual())
 		return rtn_ok;
 
 	AutoLock lckRead(vdr_tdbb);
-	GCLock::Exclusive lckGC(vdr_tdbb, relation);
+	GCLock::Exclusive lckGC(vdr_tdbb, relPerm);
 
 	if (vdr_flags & VDR_online)
 	{
-		lckRead = relation->createLock(vdr_tdbb, LCK_relation, false);
+		lckRead = relPerm->createLock(vdr_tdbb, LCK_relation, false);
 		if (!LCK_lock(vdr_tdbb, lckRead, LCK_PR, vdr_lock_tout))
 		{
 			output("Acquire relation lock failed\n");
@@ -3191,11 +3192,13 @@ Validation::RTN Validation::walk_relation(jrd_rel* relation)
 
 	vdr_cond_idx.clear();
 
-	const bool idxRootOk = (vdr_flags & VDR_records) && !relation->isSystem() ?
-		walk_root(relation, true) == rtn_ok : true;
-
 	const auto relPages = relation->getBasePages();
 	const ULONG pageSpaceId = relPages->getPageSpaceId();
+
+	DPM_scan_pages(vdr_tdbb, relPerm, relPages);
+
+	const bool idxRootOk = (vdr_flags & VDR_records) && !relPerm->isSystem() ?
+		walk_root(relation, true) == rtn_ok : true;
 
 	// Walk pointer and selected data pages associated with relation
 

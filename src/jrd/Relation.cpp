@@ -109,8 +109,7 @@ jrd_rel::jrd_rel(MemoryPool& p, Cached::Relation* r)
 	  rel_view_contexts(p),
 	  rel_triggers(p),
 	  rel_ss_definer(false),
-	  rel_scan_count(0),
-	  rel_gc_lock(this)
+	  rel_scan_count(0)
 {}
 
 RelationPermanent::RelationPermanent(thread_db* tdbb, MemoryPool& p, MetaId id, NoData)
@@ -121,6 +120,7 @@ RelationPermanent::RelationPermanent(thread_db* tdbb, MemoryPool& p, MetaId id, 
 	  rel_name(p),
 	  rel_id(id),
 	  rel_flags(REL_check_partners),
+	  rel_gc_lock(this),
 	  rel_clear_deps(p),
 	  rel_pagespaces(p, 1)
 {
@@ -605,8 +605,7 @@ RelationPages* jrd_rel::getPages(thread_db* tdbb, RelationPages::InstanceId inst
 
 	Tablespace::lock(tdbb, relPages->getPageSpaceId());
 
-	return (isTemporary() && !(tdbb->tdbb_flags & TDBB_use_db_page_space)) ?
-		rel_perm->getTempPages(tdbb, instanceId, allocPages) : relPages;
+	return rel_perm->useTempPages(tdbb) ? rel_perm->getTempPages(tdbb, instanceId, allocPages) : relPages;
 }
 
 void jrd_rel::deletePages(thread_db* tdbb)
@@ -614,27 +613,22 @@ void jrd_rel::deletePages(thread_db* tdbb)
 	DPM_delete_relation(tdbb, rel_perm, getBasePages());
 }
 
-void jrd_rel::getRelLockKey(thread_db* tdbb, UCHAR* key)
+void RelationPermanent::getRelLockKey(thread_db* tdbb, UCHAR* key)
 {
 	const ULONG val = getId();
 	memcpy(key, &val, sizeof(ULONG));
 	key += sizeof(ULONG);
 
-	const RelationPages::InstanceId inst_id = getPages(tdbb)->getInstanceId();
+	const RelationPages::InstanceId inst_id = getInstanceId(tdbb);
 	memcpy(key, &inst_id, sizeof(inst_id));
 }
 
-constexpr USHORT jrd_rel::getRelLockKeyLength() noexcept
-{
-	return sizeof(ULONG) + sizeof(SINT64);
-}
-
-Lock* jrd_rel::createLock(thread_db* tdbb, lck_t lckType, bool noAst)
+Lock* RelationPermanent::createLock(thread_db* tdbb, lck_t lckType, bool noAst)
 {
 	return createLock(tdbb, getPool(), lckType, noAst);
 }
 
-Lock* jrd_rel::createLock(thread_db* tdbb, MemoryPool& pool, lck_t lckType, bool noAst)
+Lock* RelationPermanent::createLock(thread_db* tdbb, MemoryPool& pool, lck_t lckType, bool noAst)
 {
 	const USHORT relLockLen = getRelLockKeyLength();
 
@@ -706,6 +700,8 @@ void RelationPermanent::releaseLock(thread_db* tdbb)
 {
 	if (rel_partners_lock)
 		LCK_release(tdbb, rel_partners_lock);
+
+	rel_gc_lock.forcedRelease(tdbb);
 
 	for (auto* index : rel_indices)
 	{
@@ -1121,7 +1117,6 @@ void IndexPermanent::reloadAst(thread_db* tdbb, TraNumber tran, bool erase)
 void jrd_rel::destroy(thread_db* tdbb, jrd_rel* rel)
 {
     rel->releaseTriggers(tdbb, true);
-	rel->rel_gc_lock.forcedRelease(tdbb);
 	delete rel;
 }
 

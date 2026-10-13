@@ -979,7 +979,7 @@ void BulkInsertNode::fromCursor(thread_db* tdbb, Request* request) const
 	const StreamType stream = target->getStream();
 	record_param* rpb = &request->req_rpb[stream];
 	jrd_rel* relation = rpb->rpb_relation;
-	RLCK_reserve_relation(tdbb, transaction, relation, true);
+	RLCK_reserve_relation(tdbb, transaction, relation->getPermanent(), true);
 
 	const Format* format = relation->currentFormat(tdbb);
 	auto record = VIO_record(tdbb, rpb, format, tdbb->getDefaultPool());
@@ -1040,7 +1040,7 @@ void BulkInsertNode::fromMessage(thread_db* tdbb, Request* request) const
 
 	if (!impure->descs)
 	{
-		RLCK_reserve_relation(tdbb, transaction, relation, true);
+		RLCK_reserve_relation(tdbb, transaction, relation->getPermanent(), true);
 
 		auto compound = nodeAs<CompoundStmtNode>(statement);
 		const auto count = compound->statements.getCount();
@@ -3761,7 +3761,7 @@ const StmtNode* EraseNode::erase(thread_db* tdbb, Request* request, WhichTrigger
 	request->req_operation = Request::req_return;
 
 	if (relation)
-		RLCK_reserve_relation(tdbb, transaction, relation, true);
+		RLCK_reserve_relation(tdbb, transaction, relation->getPermanent(), true);
 
 	if (rpb->rpb_runtime_flags & RPB_just_deleted)
 		return parentStmt;
@@ -9571,7 +9571,7 @@ const StmtNode* ModifyNode::modify(thread_db* tdbb, Request* request, WhichTrigg
 
 	impure->sta_state = 0;
 	if (relation)
-		RLCK_reserve_relation(tdbb, transaction, relation, true);
+		RLCK_reserve_relation(tdbb, transaction, relation->getPermanent(), true);
 
 	if (orgRpb->rpb_runtime_flags & RPB_just_deleted)
 	{
@@ -10638,7 +10638,7 @@ const StmtNode* StoreNode::store(thread_db* tdbb, Request* request, WhichTrigger
 
 			impure->sta_state = 0;
 			if (relation)
-				RLCK_reserve_relation(tdbb, transaction, relation, true);
+				RLCK_reserve_relation(tdbb, transaction, relation->getPermanent(), true);
 			break;
 
 		case Request::req_return:
