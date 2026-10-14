@@ -2013,7 +2013,7 @@ static void db_open(ULONG pageSpaceId, const MetaString& name, const PathName& f
 
 	if (file->fil_desc == INVALID_HANDLE_VALUE)
 	{
-		tddba->uSvc->getStatusAccessor().setServiceStatus(GSTAT_MSG_FAC, 29, SafeArg() << file_name);
+		tddba->uSvc->getStatusAccessor().setServiceStatus(GSTAT_MSG_FAC, 29, SafeArg() << fileName.c_str());
 		// msg 29: Can't open database file %s
 		db_error(GetLastError());
 	}
