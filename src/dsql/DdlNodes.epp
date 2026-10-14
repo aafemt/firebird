@@ -165,33 +165,15 @@ void ExecInSecurityDb::executeInSecurityDb(jrd_tra* localTransaction)
 		secDbContext = localTransaction->setSecDbContext(att, tra);
 	}
 
-	// run all statements under savepoint control
-	string savePoint;
-	savePoint.printf("ExecInSecurityDb%d", secDbContext->savePoint++);
-	secDbContext->att->execute(&statusWrapper, secDbContext->tra, 0, ("SAVEPOINT " + savePoint).c_str(),
-		SQL_DIALECT_V6, NULL, NULL, NULL, NULL);
-	check(&statusWrapper);
-
 	try
 	{
 		runInSecurityDb(secDbContext);
 
-		secDbContext->att->execute(&statusWrapper, secDbContext->tra, 0,
-			("RELEASE SAVEPOINT " + savePoint).c_str(),
-			SQL_DIALECT_V6, NULL, NULL, NULL, NULL);
-		savePoint.erase();
-		check(&statusWrapper);
+		secDbContext->releaseSavePoint();
 	}
 	catch (const Exception&)
 	{
-		if (savePoint.hasData())
-		{
-			LocalStatus tmp;
-			CheckStatusWrapper tmpCheckStatusWrapper(&tmp);
-			secDbContext->att->execute(&tmpCheckStatusWrapper, secDbContext->tra, 0,
-				("ROLLBACK TO SAVEPOINT " + savePoint).c_str(),
-				SQL_DIALECT_V6, NULL, NULL, NULL, NULL);
-		}
+		secDbContext->rollbackSavePoint();
 
 		throw;
 	}
@@ -5548,7 +5530,6 @@ void upgradeSingleIndex(thread_db* tdbb,
 		INEW IN RDB$INDICES
 	{
 		INEW.RDB$INDEX_ID.NULL = TRUE;
-		INEW.RDB$FORMAT.NULL = TRUE;		// Leave it till DFW_update_index()
 
 		assign(INEW.RDB$INDEX_NAME, INEW.RDB$INDEX_NAME.NULL, index_name);
 		assign(INEW.RDB$RELATION_NAME, INEW.RDB$RELATION_NAME.NULL, relation_name);
@@ -10209,6 +10190,25 @@ void CreateRelationNode::defineQueryColumns(thread_db* tdbb, DsqlCompilerScratch
 	dsqlScratch->derivedContext.clear();
 }
 
+// Check whether a domain has a CHECK constraint (validation).
+static bool domainHasCheck(thread_db* tdbb, jrd_tra* transaction, const QualifiedName& domainName)
+{
+	AUTO_HANDLE(request);
+	bool hasCheck = false;
+
+	FOR(REQUEST_HANDLE request TRANSACTION_HANDLE transaction)
+		FIRST 1
+		FLD IN RDB$FIELDS
+		WITH FLD.RDB$SCHEMA_NAME EQ domainName.schema.c_str() AND
+			 FLD.RDB$FIELD_NAME EQ domainName.object.c_str()
+	{
+		hasCheck = !FLD.RDB$VALIDATION_BLR.NULL;
+	}
+	END_FOR
+
+	return hasCheck;
+}
+
 void CreateRelationNode::executeInsert(thread_db* tdbb, DsqlCompilerScratch* dsqlScratch,
 	jrd_tra* transaction)
 {
@@ -10217,12 +10217,22 @@ void CreateRelationNode::executeInsert(thread_db* tdbb, DsqlCompilerScratch* dsq
 
 	bool first = true;
 
+	// Bulk insert does not run domain CHECK constraints, so use it only when no column
+	// references a domain that has one.
+	bool useBulkInsert = true;
+
 	for (const auto& clause : clauses)
 	{
 		if (clause->type != Clause::TYPE_ADD_COLUMN)
 			continue;
 
 		const auto addColumnClause = static_cast<const AddColumnClause*>(clause.getObject());
+
+		if (useBulkInsert && addColumnClause->field->typeOfName.object.hasData() &&
+			domainHasCheck(tdbb, transaction, addColumnClause->field->typeOfName))
+		{
+			useBulkInsert = false;
+		}
 
 		if (!first)
 			sql += ", ";
@@ -10245,7 +10255,8 @@ void CreateRelationNode::executeInsert(thread_db* tdbb, DsqlCompilerScratch* dsq
 	AutoSetRestoreFlag<ULONG> noDbPageSpace(&tdbb->tdbb_flags, TDBB_use_db_page_space, false);
 
 	DSQL_execute_immediate(tdbb, attachment, &traHandle, sql.length(), sql.c_str(),
-		dsqlScratch->clientDialect, nullptr, nullptr, nullptr, nullptr, true);
+		dsqlScratch->clientDialect, nullptr, nullptr, nullptr, nullptr, true,
+		(useBulkInsert ? DsqlCompilerScratch::FLAG_BULK_INSERT : 0));
 
 	fb_assert(traHandle == transaction);
 }
@@ -13578,7 +13589,7 @@ MetaId StoreIndexNode::create(thread_db* tdbb, jrd_tra* transaction)
 
 		fb_assert(idxId == idx.idx_id);
 		if (!tempConn)
-			DFW_update_index(indexName, idxId, selectivity, transaction, relation);
+			DFW_update_index(indexName, idxId, selectivity, transaction);
 
 		if (concurrently && (idx.idx_flags & idx_unique))
 			validateUniqueIndex(tdbb, transaction, true);
@@ -13825,7 +13836,6 @@ ModifyIndexNode* CreateIndexNode::store(thread_db* tdbb, MemoryPool& p, jrd_tra*
 		IDX IN RDB$INDICES
 	{
 		IDX.RDB$INDEX_ID.NULL = TRUE;
-		IDX.RDB$FORMAT.NULL = TRUE;			// will be set in DFW_update_index
 		IDX.RDB$UNIQUE_FLAG.NULL = TRUE;
 		IDX.RDB$INDEX_INACTIVE.NULL = TRUE;
 		IDX.RDB$INDEX_TYPE.NULL = TRUE;
@@ -15951,6 +15961,8 @@ void MappingNode::runInSecurityDb(SecDbContext* secDbContext)
 	{
 		try
 		{
+			secDbContext->setSavePoint();
+
 			// try direct access to rdb$auth_mapping table in secure db
 			LocalStatus s2;
 			CheckStatusWrapper statusWrapper2(&s2);
@@ -16631,6 +16643,8 @@ void GrantRevokeNode::execute(thread_db* tdbb, DsqlCompilerScratch* dsqlScratch,
 
 void GrantRevokeNode::runInSecurityDb(SecDbContext* secDbContext)
 {
+	secDbContext->setSavePoint();
+
 	for (unsigned n = 0; n < createDbJobs.getCount(); ++n)
 	{
 		CreateDbJob& j = createDbJobs[n];

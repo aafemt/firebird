@@ -412,9 +412,9 @@ private:
 
 bool SweepTask::handler(WorkItem& _item)
 {
-	Item* item = reinterpret_cast<Item*>(&_item);
+	const auto item = reinterpret_cast<Item*>(&_item);
 
-	ThreadContextHolder tdbb(NULL);
+	ThreadContextHolder tdbb;
 
 	if (!item->init(tdbb))
 	{
@@ -423,38 +423,39 @@ bool SweepTask::handler(WorkItem& _item)
 	}
 
 	WorkerContextHolder wrkHolder(tdbb, FB_FUNCTION);
+	const auto dbb = tdbb->getDatabase();
 
 	record_param rpb;
-	jrd_rel* relation = NULL;
+	Cached::Relation* relation = nullptr;
 
 	try
 	{
 		RelInfo* relInfo = item->m_relInfo;
 
-		Database* dbb = tdbb->getDatabase();
-
-		relation = MetadataCache::getVersioned<Cached::Relation>(tdbb, relInfo->rel_id, CacheFlag::AUTOCREATE);
-		const auto relPerm = relation->getPermanent();
+		const auto relVersion = MetadataCache::getVersioned<Cached::Relation>(tdbb, relInfo->rel_id,
+																			  CacheFlag::AUTOCREATE);
+		relation = getPermanent(relVersion);
+		const auto relPages = relVersion->getPages(tdbb);
 
 		if (relation &&
-			!relPerm->isDropped() &&
-			!relPerm->isTemporary() &&
-			relation->getPages(tdbb)->hasData())
+			!relation->isDropped() &&
+			!relation->isTemporary() &&
+			relPages && relPages->hasData())
 		{
-			GCLock::Shared gcGuard(tdbb, relPerm);
+			GCLock::Shared gcGuard(tdbb, relation);
 			if (!gcGuard.gcEnabled())
 			{
 				string str;
-				str.printf("Acquire garbage collection lock failed (%s)", relPerm->getName().toQuotedString().c_str());
+				str.printf("Acquire garbage collection lock failed (%s)", relation->getName().toQuotedString().c_str());
 				status_exception::raise(Arg::Gds(isc_random) << Arg::Str(str));
 			}
 
 			jrd_tra* tran = tdbb->getTransaction();
 
 			if (relInfo->countPP == 0)
-				relInfo->countPP = relation->getPages(tdbb)->getPointerPageCount();
+				relInfo->countPP = relPages->getPointerPageCount();
 
-			rpb.rpb_relation = relation;
+			rpb.rpb_relation = relVersion;
 			rpb.rpb_org_scans = relation->rel_scan_count++;
 			rpb.rpb_record = NULL;
 			rpb.rpb_stream_flags = RPB_s_no_data | RPB_s_sweeper;
@@ -471,7 +472,7 @@ bool SweepTask::handler(WorkItem& _item)
 			{
 				CCH_RELEASE(tdbb, &rpb.getWindow(tdbb));
 
-				if (relPerm->isDropped())
+				if (relation->isDropped())
 					break;
 
 				if (rpb.rpb_number >= lastRecNo)
@@ -496,12 +497,9 @@ bool SweepTask::handler(WorkItem& _item)
 		ex.stuffException(tdbb->tdbb_status_vector);
 
 		delete rpb.rpb_record;
-		if (relation)
-		{
-			if (relation->rel_scan_count) {
-				--relation->rel_scan_count;
-			}
-		}
+
+		if (relation && relation->rel_scan_count)
+			--relation->rel_scan_count;
 	}
 
 	setError(tdbb->tdbb_status_vector, true);
@@ -4877,8 +4875,6 @@ bool VIO_sweep(thread_db* tdbb, jrd_tra* transaction, TraceSweepEvent* traceSwee
 	// hvlad: restore tdbb->transaction since it can be used later
 	tdbb->setTransaction(transaction);
 
-	jrd_rel* relation;
-
 	record_param rpb;
 	rpb.rpb_record = NULL;
 	rpb.rpb_stream_flags = RPB_s_no_data | RPB_s_sweeper;
@@ -4887,26 +4883,30 @@ bool VIO_sweep(thread_db* tdbb, jrd_tra* transaction, TraceSweepEvent* traceSwee
 	GarbageCollector* gc = dbb->dbb_garbage_collector;
 	bool ret = true;
 
-	try {
+	Cached::Relation* relation = nullptr;
+
+	try
+	{
 		MetadataCache* mdc = MetadataCache::get(tdbb);
 		for (FB_SIZE_T i = 1; i < mdc->relCount(); i++)
 		{
-			relation = MetadataCache::getVersioned<Cached::Relation>(tdbb, i, CacheFlag::AUTOCREATE);
-			const auto relPerm = relation->getPermanent();
+			const auto relVersion = MetadataCache::getVersioned<Cached::Relation>(tdbb, i, CacheFlag::AUTOCREATE);
+			relation = relVersion->getPermanent();
+			const auto relPages = relVersion->getPages(tdbb);
 
 			if (relation &&
-				!relPerm->isDropped() &&
-				!relPerm->isTemporary() &&
-				relation->getPages(tdbb)->hasData())
+				!relation->isDropped() &&
+				!relation->isTemporary() &&
+				relPages && relPages->hasData())
 			{
-				GCLock::Shared gcGuard(tdbb, relPerm);
+				GCLock::Shared gcGuard(tdbb, relation);
 				if (!gcGuard.gcEnabled())
 				{
 					ret = false;
 					break;
 				}
 
-				rpb.rpb_relation = relation;
+				rpb.rpb_relation = relVersion;
 				rpb.rpb_number.setValue(BOF_NUMBER);
 				rpb.rpb_org_scans = relation->rel_scan_count++;
 
@@ -4920,7 +4920,7 @@ bool VIO_sweep(thread_db* tdbb, jrd_tra* transaction, TraceSweepEvent* traceSwee
 				{
 					CCH_RELEASE(tdbb, &rpb.getWindow(tdbb));
 
-					if (relPerm->isDropped())
+					if (relation->isDropped())
 						break;
 
 					JRD_reschedule(tdbb);
@@ -4943,11 +4943,8 @@ bool VIO_sweep(thread_db* tdbb, jrd_tra* transaction, TraceSweepEvent* traceSwee
 	{
 		delete rpb.rpb_record;
 
-		if (relation)
-		{
-			if (relation->rel_scan_count)
-				--relation->rel_scan_count;
-		}
+		if (relation && relation->rel_scan_count)
+			--relation->rel_scan_count;
 
 		ERR_punt();
 	}
@@ -5837,7 +5834,7 @@ void Database::garbage_collector(Database* dbb)
 					(gc_bitmap = gc->getPages(dbb->dbb_oldest_snapshot, relID)))
 				{
 					relation = MetadataCache::getVersioned<Cached::Relation>(tdbb, relID, CacheFlag::AUTOCREATE);
-					const auto relPerm = relation->getPermanent();
+					const auto relPerm = getPermanent(relation);
 
 					if (!relation || relPerm->isDropped())
 					{

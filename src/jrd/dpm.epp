@@ -1842,10 +1842,10 @@ bool DPM_next(thread_db* tdbb, record_param* rpb, USHORT lock_type, FindNextReco
 	{
 		// Try to account for staggered execution of large sequential scans.
 
-		window->win_scans = rpb->rpb_relation->rel_scan_count - rpb->rpb_org_scans;
+		window->win_scans = rpb->rpb_relation->getPermanent()->rel_scan_count - rpb->rpb_org_scans;
 
 		if (window->win_scans < 1)
-			window->win_scans = rpb->rpb_relation->rel_scan_count;
+			window->win_scans = rpb->rpb_relation->getPermanent()->rel_scan_count;
 	}
 	rpb->rpb_prior = NULL;
 

@@ -59,7 +59,7 @@ void FullTableScan::internalOpen(thread_db* tdbb) const
 
 	const auto transaction = m_relation()->isLTT() ? tdbb->getTransaction() : request->req_transaction;
 	const auto relation = m_relation(tdbb);
-	RLCK_reserve_relation(tdbb, transaction, m_relation(), false);
+	RLCK_reserve_relation(tdbb, transaction, relation->getPermanent(), false);
 
 	record_param* const rpb = &request->req_rpb[m_stream];
 	rpb->getWindow(tdbb).win_flags = 0;
@@ -84,7 +84,7 @@ void FullTableScan::internalOpen(thread_db* tdbb) const
 		if (attachment->isGbak() || DPM_data_pages(tdbb, relation) > bcb->bcb_count)
 		{
 			rpb->getWindow(tdbb).win_flags = WIN_large_scan;
-			rpb->rpb_org_scans = relation->rel_scan_count++;
+			rpb->rpb_org_scans = relation->getPermanent()->rel_scan_count++;
 		}
 	}
 
@@ -123,7 +123,7 @@ void FullTableScan::close(thread_db* tdbb) const
 	{
 		impure->irsb_flags &= ~irsb_open;
 
-		const auto relation = m_relation(tdbb);
+		const auto relation = m_relation();
 
 		record_param* const rpb = &request->req_rpb[m_stream];
 		if ((rpb->getWindow(tdbb).win_flags & WIN_large_scan) &&

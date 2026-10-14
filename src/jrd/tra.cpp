@@ -4348,7 +4348,7 @@ TraceSweepEvent::~TraceSweepEvent()
 }
 
 
-void TraceSweepEvent::beginSweepRelation(const jrd_rel* relation)
+void TraceSweepEvent::beginSweepRelation(const RelationPermanent* relation)
 {
 	if (!m_need_trace)
 		return;
@@ -4436,8 +4436,8 @@ void TraceSweepEvent::report(ntrace_process_state_t state)
 		m_need_trace = false;
 }
 
-SecDbContext::SecDbContext(IAttachment* a, ITransaction* t) noexcept
-	: att(a), tra(t), savePoint(0)
+SecDbContext::SecDbContext(MemoryPool& p, IAttachment* a, ITransaction* t) noexcept
+	: att(a), tra(t), savePoint(p)
 { }
 
 SecDbContext::~SecDbContext()
@@ -4465,7 +4465,7 @@ SecDbContext* jrd_tra::setSecDbContext(IAttachment* att, ITransaction* tra)
 {
 	fb_assert(!tra_sec_db_context);
 
-	tra_sec_db_context = FB_NEW_POOL(*getDefaultMemoryPool()) SecDbContext(att, tra);
+	tra_sec_db_context = FB_NEW_POOL(*getDefaultMemoryPool()) SecDbContext(getPool(), att, tra);
 	return tra_sec_db_context;
 }
 
@@ -4474,3 +4474,37 @@ void jrd_tra::eraseSecDbContext() noexcept
 	delete tra_sec_db_context;
 	tra_sec_db_context = NULL;
 }
+
+void SecDbContext::setSavePoint()
+{
+	fb_assert(savePoint.isEmpty());
+	FbLocalStatus status;
+
+	savePoint.printf("ExecInSecurityDb%d", savePointNumber++);
+	att->execute(&status, tra, 0, ("SAVEPOINT " + savePoint).c_str(), SQL_DIALECT_V6, NULL, NULL, NULL, NULL);
+	check(&status);
+}
+
+void SecDbContext::releaseSavePoint()
+{
+	if (savePoint.hasData())
+	{
+		FbLocalStatus status;
+		att->execute(&status, tra, 0, ("RELEASE SAVEPOINT " + savePoint).c_str(),
+			SQL_DIALECT_V6, NULL, NULL, NULL, NULL);
+		check(&status);
+		rollbackSavePoint();
+	}
+}
+
+void SecDbContext::rollbackSavePoint() noexcept
+{
+	if (savePoint.hasData())
+	{
+		FbLocalStatus status;
+		att->execute(&status, tra, 0, ("ROLLBACK TO SAVEPOINT " + savePoint).c_str(),
+			SQL_DIALECT_V6, NULL, NULL, NULL, NULL);
+		savePoint.erase();
+	}
+}
+

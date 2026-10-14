@@ -729,7 +729,6 @@ private:
 	MetaId				idp_id;
 	TraNumber			idp_tranum = 0;
 	UCHAR				idp_state = 0;		// Makes limited sense for segmented indices
-	UCHAR				idp_formatNumber = 0;
 
 	[[noreturn]] void errIndexGone();
 
@@ -753,16 +752,6 @@ public:
 	void setState(UCHAR state) noexcept
 	{
 		idp_state = state;
-	}
-
-	UCHAR getFormat() const noexcept
-	{
-		return idp_formatNumber;
-	}
-
-	void setFormat(UCHAR fmt) noexcept
-	{
-		idp_formatNumber = fmt;
 	}
 
 private:
@@ -1217,6 +1206,7 @@ public:
 	QualifiedName rel_security_name;	// security class name for relation
 	std::atomic<ULONG> rel_flags;		// flags
 
+	std::atomic<SSHORT> rel_scan_count;	// concurrent sequential scan count
 	GCLock rel_gc_lock;					// garbage collection lock
 
 	enum class Bool3State {Unknown, False, True};
@@ -1291,8 +1281,6 @@ public:
 	TrigArray rel_triggers;
 
 	Firebird::TriState	rel_ss_definer;
-
-	std::atomic<SSHORT> rel_scan_count;		// concurrent sequential scan count
 
 	bool hasData() const
 	{

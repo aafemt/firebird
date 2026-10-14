@@ -330,15 +330,13 @@ string DropTablespaceNode::internalPrint(NodePrinter& printer) const
 
 void DropTablespaceNode::checkDependencies(thread_db* tdbb, jrd_tra* transaction)
 {
-	const auto metaTransaction = tdbb->getAttachment()->getMetaTransaction(tdbb);
-
 	static const CachedRequestId requestHandleId1, requestHandleId2;
 	unsigned total = 0;
 
 	// Find all tables
 	AutoCacheRequest requestHandle1(tdbb, requestHandleId1);
 
-	FOR (REQUEST_HANDLE requestHandle1 TRANSACTION_HANDLE metaTransaction)
+	FOR (REQUEST_HANDLE requestHandle1 TRANSACTION_HANDLE transaction)
 		X IN RDB$RELATIONS
 		WITH X.RDB$TABLESPACE_NAME EQ name.c_str()
 	{
@@ -349,7 +347,7 @@ void DropTablespaceNode::checkDependencies(thread_db* tdbb, jrd_tra* transaction
 	// Find all indices
 	AutoCacheRequest requestHandle2(tdbb, requestHandleId2);
 
-	FOR (REQUEST_HANDLE requestHandle2 TRANSACTION_HANDLE metaTransaction)
+	FOR (REQUEST_HANDLE requestHandle2 TRANSACTION_HANDLE transaction)
 		X IN RDB$INDICES
 		WITH X.RDB$TABLESPACE_NAME EQ name.c_str()
 	{

@@ -1760,7 +1760,7 @@ DeferredWork* DFW_post_work_arg( jrd_tra* transaction, DeferredWork* work, const
 
 
 void DFW_update_index(const QualifiedName& name, USHORT id, const SelectivityList& selectivity,
-	jrd_tra* transaction, jrd_rel* relation)
+	jrd_tra* transaction)
 {
 /**************************************
  *
@@ -1802,11 +1802,6 @@ void DFW_update_index(const QualifiedName& name, USHORT id, const SelectivityLis
 			IDX.RDB$INDEX_ID = id + 1;
 			IDX.RDB$INDEX_ID.NULL = FALSE;
 			IDX.RDB$STATISTICS = selectivity.back();
-			if (relation)
-			{
-				IDX.RDB$FORMAT = relation->rel_current_fmt;
-				IDX.RDB$FORMAT.NULL = FALSE;
-			}
 		END_MODIFY
 	}
 	END_FOR
@@ -4090,6 +4085,7 @@ static bool delete_rfr(thread_db* tdbb, SSHORT phase, DeferredWork* work, jrd_tr
 				CROSS RFLD IN RDB$RELATION_FIELDS
 				WITH RFLD.RDB$SCHEMA_NAME EQ REL.RDB$SCHEMA_NAME AND
 					 RFLD.RDB$PACKAGE_NAME EQUIV REL.RDB$PACKAGE_NAME AND
+					 RFLD.RDB$RELATION_NAME EQ REL.RDB$RELATION_NAME AND
 					 REL.RDB$RELATION_ID EQ work->dfw_id
 			{
 				field_count++;

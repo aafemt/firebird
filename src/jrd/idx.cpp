@@ -771,7 +771,7 @@ bool IndexCreateTask::handler(WorkItem& _item)
 	if (m_flags & IS_LARGE_SCAN)
 	{
 		primary.getWindow(tdbb).win_flags = secondary.getWindow(tdbb).win_flags = WIN_large_scan;
-		primary.rpb_org_scans = secondary.rpb_org_scans = relation->rel_scan_count++;
+		primary.rpb_org_scans = secondary.rpb_org_scans = relation->getPermanent()->rel_scan_count++;
 	}
 
 	Cleanup cleanAfterScan([&]
@@ -783,7 +783,7 @@ bool IndexCreateTask::handler(WorkItem& _item)
 			delete free.pop();
 
 		if (m_flags & IS_LARGE_SCAN)
-			--relation->rel_scan_count;
+			--relation->getPermanent()->rel_scan_count;
 	});
 
 	const bool isDescending = (idx->idx_flags & idx_descending);

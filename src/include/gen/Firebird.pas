@@ -4513,6 +4513,7 @@ const
 	isc_spb_bkp_no_triggers = $8000;
 	isc_spb_bkp_zip = $010000;
 	isc_spb_bkp_direct_io = $020000;
+	isc_spb_bkp_fast_path = $040000;
 	isc_spb_prp_page_buffers = byte(5);
 	isc_spb_prp_sweep_interval = byte(6);
 	isc_spb_prp_shutdown_db = byte(7);
@@ -6073,10 +6074,11 @@ const
 	 isc_dsql_agg_return = 335545340;
 	 isc_hypfun_args_non_equal_sort_item = 335545341;
 	 isc_old_format = 335545342;
-	 isc_ts_file_exists = 335545343;
-	 isc_tablespace_name = 335545344;
-	 isc_ts_file_not_exists = 335545345;
-	 isc_ts_file_dup = 335545346;
+	 isc_user_savepoint = 335545343;
+	 isc_ts_file_exists = 335545344;
+	 isc_tablespace_name = 335545345;
+	 isc_ts_file_not_exists = 335545346;
+	 isc_ts_file_dup = 335545347;
 	 isc_gfix_db_name = 335740929;
 	 isc_gfix_invalid_sw = 335740930;
 	 isc_gfix_incmp_sw = 335740932;
@@ -6351,6 +6353,10 @@ const
 	 isc_gbak_writing_constant = 336331176;
 	 isc_gbak_constant = 336331177;
 	 isc_gbak_restoring_constant = 336331178;
+	 isc_gbak_inv_column = 336331180;
+	 isc_gbak_inv_record_length = 336331181;
+	 isc_gbak_fast_path_needs_service = 336331182;
+	 isc_gbak_fast_path_no_snapshot = 336331184;
 	 isc_dsql_too_old_ods = 336397205;
 	 isc_dsql_table_not_found = 336397206;
 	 isc_dsql_view_not_found = 336397207;

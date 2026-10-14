@@ -331,6 +331,7 @@ RelationPermanent::RelationPermanent(thread_db* tdbb, MemoryPool& p, MetaId id, 
 	  rel_name(p),
 	  rel_id(id),
 	  rel_flags(REL_check_partners),
+	  rel_scan_count(0),
 	  rel_gc_lock(this),
 	  rel_clear_deps(p),
 	  rel_pagespaces(p, 1)
@@ -915,8 +916,7 @@ jrd_rel::jrd_rel(MemoryPool& p, Cached::Relation* r)
 	  rel_perm(r),
 	  rel_view_contexts(p),
 	  rel_triggers(p),
-	  rel_ss_definer(false),
-	  rel_scan_count(0)
+	  rel_ss_definer(false)
 {}
 
 jrd_rel* jrd_rel::create(thread_db* tdbb, MemoryPool& pool, Cached::Relation* rlp)
