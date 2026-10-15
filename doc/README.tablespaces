@@ -69,7 +69,7 @@ ODS CHANGES
 -----------------
 
     A new table RDB$TABLESPACES:
-    RDB$TABLESPACE_ID - INTEGER # internally it will be pagespaceid.
+    RDB$TABLESPACE_ID - INTEGER # internally it will be pagespace ID
     RDB$TABLESPACE_NAME - CHAR (63) # name of a tablespace
     RDB$SECURITY_CLASS - CHAR (63) # security class for tablespace
     RDB$SYSTEM_FLAG - SMALLINT # reserved for future
@@ -78,6 +78,12 @@ ODS CHANGES
     RDB$FILE_NAME - VARCHAR (255) # file where a tablespace data are located
     RDB$OFFLINE - BOOLEAN # reserved for future
     RDB$READ_ONLY - BOOLEAN # reserved for future
+
+    A new table MON$TABLESPACE_STATS:
+    MON$STAT_ID INTEGER - INTEGER # statistics ID
+    MON$STAT_GROUP - SMALLINT # statistics group
+    MON$TABLESPACE_NAME - CHAR(63) # tablespace name
+    MON$IO_STAT_ID - INT # page-level statistics ID, refers to MON$IO_STATS
 
     New field in RDB$INDICES:
     RDB$TABLESPACE_NAME - CHAR (63)
