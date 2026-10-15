@@ -83,7 +83,7 @@ ODS CHANGES
     MON$STAT_ID INTEGER - INTEGER # statistics ID
     MON$STAT_GROUP - SMALLINT # statistics group
     MON$TABLESPACE_NAME - CHAR(63) # tablespace name
-    MON$IO_STAT_ID - INT # page-level statistics ID, refers to MON$IO_STATS
+    MON$IO_STAT_ID - INTEGER # page-level statistics ID, refers to MON$IO_STATS
 
     New field in RDB$INDICES:
     RDB$TABLESPACE_NAME - CHAR (63)
