@@ -8161,9 +8161,14 @@ bool JRD_shutdown_database(Database* dbb, const unsigned flags)
 	// Release the system requests
 	dbb->releaseSystemRequests(tdbb);
 
-	CCH_shutdown(tdbb);
+	// Release cached metadata objects (procedures, functions, etc.) while
+	// the buffer manager and lock manager are still alive.
+	// This is needed because Statement::release may require page access
+	// (e.g. for LTT cleanup via IDX_delete_indices).
+	dbb->dbb_mdc->cleanup(tdbb);
+	dbb->dbb_tablespaces.release(tdbb);
 
-	dbb->dbb_mdc->releaseLocks(tdbb);
+	CCH_shutdown(tdbb);
 
 	if (dbb->dbb_tip_cache)
 		dbb->dbb_tip_cache->finalizeTpc(tdbb);
@@ -8193,16 +8198,7 @@ bool JRD_shutdown_database(Database* dbb, const unsigned flags)
 		LCK_release(tdbb, dbb->dbb_lock);
 
 	delete dbb->dbb_crypto_manager;
-	dbb->dbb_crypto_manager = NULL;
-
-	dbb->dbb_mdc->cleanup(tdbb);
-	dbb->dbb_tablespaces.release(tdbb);
-
-	// Release cached metadata objects (procedures, functions, etc.) while
-	// the buffer manager and lock manager are still alive.
-	// This is needed because Statement::release may require page access
-	// (e.g. for LTT cleanup via IDX_delete_indices).
-	dbb->dbb_mdc->cleanup(tdbb);
+	dbb->dbb_crypto_manager = nullptr;
 
 	LCK_fini(tdbb, LCK_OWNER_database);
 
