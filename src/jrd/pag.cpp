@@ -2116,11 +2116,10 @@ void PageManager::deletePageSpace(const ULONG pageSpace, bool deleteFile)
 
 void PageManager::closeAll()
 {
-	for (FB_SIZE_T i = 0; i < pageSpaces.getCount(); i++)
+	for (const auto pageSpace : pageSpaces)
 	{
-		if (pageSpaces[i]->file) {
-			PIO_close(pageSpaces[i]->file);
-		}
+		if (pageSpace->file)
+			PIO_close(pageSpace->file);
 	}
 }
 

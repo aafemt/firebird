@@ -4036,6 +4036,7 @@ void BTR_copy_index(thread_db* tdbb, jrd_rel* relation, MetaId indexId, ULONG pa
 		const PageNumber oldRootPage(idx.idx_pg_space_id, idx.idx_root);
 
 		// Set page space id of the new tablespace
+		Tablespace::lock(tdbb, pageSpaceId);
 		idx.idx_pg_space_id = pageSpaceId;
 
 		const USHORT nullIndLen = !(idx.idx_flags & idx_descending) && (idx.idx_count == 1) ? 1 : 0;

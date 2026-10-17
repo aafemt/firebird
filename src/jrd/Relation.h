@@ -329,6 +329,9 @@ public:
 	ULONG rel_last_free_pri_dp = 0;		// last primary data page found with space
 	ULONG rel_last_free_blb_dp = 0;		// last blob data page found with space
 
+	RelationPages() = delete;
+	~RelationPages() = default;
+
 	RelationPages(Firebird::MemoryPool& pool, ULONG pageSpaceId, InstanceId instanceId = 0)
 		: Firebird::PermanentStorage(pool),
 		  m_pageSpaceId(pageSpaceId),

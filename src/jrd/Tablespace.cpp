@@ -354,6 +354,8 @@ Tablespace* Tablespace::init(thread_db* tdbb, ULONG id, const MetaName& name,
 
 	if (name.isEmpty() && !MET_tablespace(tdbb, id, tsName, fileName))
 	{
+		LCK_release(tdbb, lock);
+
 		string errName;
 		errName.printf("TABLESPACE (id=%)" ULONGFORMAT, id);
 
