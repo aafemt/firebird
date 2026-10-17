@@ -2485,14 +2485,18 @@ table_clause
 			{
 				$<createRelationNode>$ = newNode<CreateRelationNode>($1, $2);
 			}
-		'(' table_elements($3) ')' table_attributes($3)
+		'(' table_elements($3) ')' table_attributes_opt($3)
 			{
 				$$ = $3;
 			}
 	| table_as_query_clause
-		{
-			$$ = $1;
-		}
+			{
+				$<createRelationNode>$ = $1;
+			}
+		table_attributes_opt($2)
+			{
+				$$ = $2;
+			}
 	;
 
 %type <boolVal> with_data_opt
@@ -2502,10 +2506,10 @@ with_data_opt
 	| WITH NO DATA		{ $$ = false; }
 	;
 
-%type table_attributes(<relationNode>)
-table_attributes($relationNode)
+%type table_attributes_opt(<relationNode>)
+table_attributes_opt($relationNode)
 	: /* nothing */
-	| table_attribute($relationNode) table_attributes($relationNode)
+	| table_attribute($relationNode) table_attributes_opt($relationNode)
 	;
 
 %type table_attribute(<relationNode>)
