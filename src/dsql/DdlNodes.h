@@ -1974,20 +1974,23 @@ public:
 class ModifyIndexNode
 {
 public:
-	ModifyIndexNode(const QualifiedName& indexName, Cached::Relation* rel, bool create, bool expression)
+	ModifyIndexNode(const QualifiedName& indexName, Cached::Relation* rel, bool create, bool expression, bool concurrently)
 		: indexName(indexName),
 		  indexRelation(rel),
 		  create(create),
-		  expressionIndex(expression)
+		  expressionIndex(expression),
+		  concurrently(concurrently)
 	{
 		fb_assert(indexRelation);
 	}
 
-	ModifyIndexNode(const QualifiedName& indexName, bool create, bool expression)
+	ModifyIndexNode(const QualifiedName& indexName, bool create, bool expression, bool concurrently)
 		: indexName(indexName),
 		  create(create),
-		  expressionIndex(expression)
-	{ }
+		  expressionIndex(expression),
+		  concurrently(concurrently)
+	{
+	}
 
 	virtual ~ModifyIndexNode()
 	{
@@ -2013,10 +2016,17 @@ protected:
 	static Cached::Relation* getRelByIndex(thread_db* tdbb, const QualifiedName& index, jrd_tra* transaction);
 	virtual void step2(thread_db* tdbb, jrd_tra* transaction) = 0;
 
+	void setDeferredValidationFrom(const ModifyIndexNode& other)
+	{
+		deferredValidation = other.deferredValidation;
+	}
+
 	QualifiedName indexName;
 	Cached::Relation* indexRelation = nullptr;
 	bool create;
 	bool expressionIndex;
+	bool deferredValidation = false;
+	bool concurrently;
 };
 
 
@@ -2120,8 +2130,7 @@ class StoreIndexNode final : public ModifyIndexNode
 {
 public:
 	StoreIndexNode(const QualifiedName& indexName, Cached::Relation* rel, bool expressionIndex, bool concurrently)
-		: ModifyIndexNode(indexName, rel, true, expressionIndex),
-		  concurrently(concurrently)
+		: ModifyIndexNode(indexName, rel, true, expressionIndex, concurrently)
 	{ }
 
 public:
@@ -2130,16 +2139,14 @@ public:
 private:
 	MetaId create(thread_db* tdbb, jrd_tra* transaction);
 	MetaId createExpression(thread_db* tdbb, jrd_tra* transaction);
-
-	bool concurrently;
 };
 
 
 class AlterIndexNode final : public ModifyIndexNode, public DdlNode
 {
 public:
-	AlterIndexNode(MemoryPool& p, const QualifiedName& name, bool active)
-		: ModifyIndexNode(name, active, false),
+	AlterIndexNode(MemoryPool& p, const QualifiedName& name, bool active, bool concurrently)
+		: ModifyIndexNode(name, active, false, concurrently),
 		  DdlNode(p)
 	{
 	}
@@ -2179,7 +2186,6 @@ protected:
 	std::optional<MetaId> idxId;
 
 public:
-	bool concurrently = false;
 	bool validateUnique = false;
 };
 
@@ -2231,7 +2237,7 @@ class DropIndexNode final : public ModifyIndexNode, public DdlNode
 {
 public:
 	DropIndexNode(MemoryPool& p, const QualifiedName& name)
-		: ModifyIndexNode(name, false, false),
+		: ModifyIndexNode(name, false, false, false),
 		  DdlNode(p)
 	{ }
 

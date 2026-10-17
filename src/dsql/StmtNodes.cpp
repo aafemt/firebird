@@ -2438,18 +2438,13 @@ void DeclareLocalTableNode::createFrameIndex(thread_db* tdbb, FB_SIZE_T indexId,
 
 	PartitionedSort sort(dbb, &transaction->tra_sorts);
 
-	IndexCreation creation;
-	creation.index = &idx;
-	creation.index_name = QualifiedName(indexName);
-	creation.relation = relation;
-	creation.transaction = transaction;
+	IndexCreation creation(IdxCreate::AtOnce, relation, &idx, QualifiedName(indexName), transaction);
 	creation.sort = &sort;
 	creation.key_desc = keyDesc;
 	creation.key_length = keyLength;
 	creation.nullIndLen = nullIndLen;
 	creation.dup_recno = -1;
 	creation.duplicates.setValue(0);
-	creation.createMethod = IdxCreate::AtOnce;
 
 	BTR_reserve_slot(tdbb, creation);
 

@@ -516,7 +516,7 @@ public:
 		m_condBlob.clear();
 
 		int workers = 1;
-		if (att->att_parallel_workers > 0)
+		if ((att->att_parallel_workers > 0) && !creation->relation->isTemporary())
 			workers = att->att_parallel_workers;
 
 		// Classic in single-user shutdown mode can't create additional worker attachments
@@ -677,7 +677,7 @@ public:
 				FPTR_REJECT_DUP_CALLBACK callback = NULL;
 				void* callback_arg = NULL;
 
-				if ((m_idx.idx_flags & idx_unique) && !creation->isConcurrently())
+				if ((m_idx.idx_flags & idx_unique) && (creation->checkDuplicates == IdxCheckDups::WhenBuild))
 				{
 					callback = duplicate_key;
 					callback_arg = creation;
@@ -1133,12 +1133,8 @@ int IndexCreateTask::getMaxWorkers()
 
 
 void IDX_create_index(thread_db* tdbb,
-					  IdxCreate createMethod,
-					  jrd_rel* relation,
-					  index_desc* idx,
-					  const QualifiedName& index_name,
+					  IndexCreation& creation,
 					  USHORT* index_id,
-					  jrd_tra* transaction,
 					  SelectivityList& selectivity)
 {
 /**************************************
@@ -1154,6 +1150,8 @@ void IDX_create_index(thread_db* tdbb,
 	SET_TDBB(tdbb);
 	Database* dbb = tdbb->getDatabase();
 
+	auto relation = creation.relation;
+
 	if (relation->getExtFile())
 	{
 		ERR_post(Arg::Gds(isc_no_meta_update) <<
@@ -1167,8 +1165,10 @@ void IDX_create_index(thread_db* tdbb,
 
 	get_root_page(tdbb, getPermanent(relation));
 
+	auto transaction = creation.transaction;
 	fb_assert(transaction);
 
+	auto idx = creation.index;
 	const bool isDescending = (idx->idx_flags & idx_descending);
 	const bool isForeign = (idx->idx_flags & idx_foreign);
 
@@ -1187,27 +1187,21 @@ void IDX_create_index(thread_db* tdbb,
 	if (key_length >= dbb->getMaxIndexKeyLength())
 	{
 		ERR_post(Arg::Gds(isc_no_meta_update) <<
-				 Arg::Gds(isc_keytoobig) << index_name.toQuotedString());
+				 Arg::Gds(isc_keytoobig) << creation.index_name.toQuotedString());
 	}
 
 	if (isForeign)
 	{
-		if (!MET_lookup_partner(tdbb, getPermanent(relation), idx, index_name)) {
+		if (!MET_lookup_partner(tdbb, getPermanent(relation), idx, creation.index_name)) {
 			BUGCHECK(173);		// msg 173 referenced index description not found
 		}
 	}
 
-	IndexCreation creation;
-	creation.index = idx;
-	creation.index_name = index_name;
-	creation.relation = relation;
-	creation.transaction = transaction;
-	creation.sort = NULL;
+	creation.sort = nullptr;
 	creation.key_length = key_length;
 	creation.nullIndLen = nullIndLen;
 	creation.dup_recno = -1;
 	creation.duplicates.setValue(0);
-	creation.createMethod = createMethod;
 
 	IdxCreationHelper helper(tdbb, creation);
 
@@ -1282,7 +1276,7 @@ void IDX_create_index(thread_db* tdbb,
 			}
 		}
 
-		IndexErrorContext context(relation, idx, index_name);
+		IndexErrorContext context(relation, idx, creation.index_name);
 		context.raise(tdbb, idx_e_duplicate, error_record);
 	}
 
@@ -1946,12 +1940,8 @@ void IDX_store(thread_db* tdbb, record_param* rpb, jrd_tra* transaction)
 }
 
 
-bool IDX_validate_unique(thread_db* tdbb, jrd_rel* relation, MetaId id)
+bool IDX_validate_unique(thread_db* tdbb, jrd_tra* transaction, jrd_rel* relation, MetaId id)
 {
-	Database* dbb = tdbb->getDatabase();
-	Attachment* attachment = tdbb->getAttachment();
-	jrd_tra* const transaction = tdbb->getTransaction();
-
 	// We don't need to check active versions because they are already checked by
 	// corresponding INSERT or UPDATE.
 	// Thus RC RV transaction is ideal here - it skips active records and returns

@@ -408,8 +408,11 @@ RelationPages* RelationPermanent::getPagesInternal(thread_db* tdbb, RelationPage
 			}
 
 			idx.idx_root = 0;
+
+			IndexCreation creation(IdxCreate::AtOnce, rel, &idx, idx_name, idxTran);
 			SelectivityList selectivity(*pool);
-			IDX_create_index(tdbb, IdxCreate::AtOnce, rel, &idx, idx_name, NULL, idxTran, selectivity);
+
+			IDX_create_index(tdbb, creation, nullptr, selectivity);
 
 #ifdef VIO_DEBUG
 			VIO_trace(DEBUG_WRITES,

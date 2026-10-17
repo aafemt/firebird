@@ -4974,9 +4974,10 @@ static bool create_ltt_index(thread_db* tdbb, SSHORT phase, DeferredWork* work, 
 	{	// scope
 		AutoSetRestoreFlag<ULONG> dbPageSpace(&tdbb->tdbb_flags, TDBB_use_db_page_space, true);
 
+		IndexCreation creation(IdxCreate::AtOnce, relation, &idx, work->getQualifiedName(), transaction);
 		SelectivityList selectivity(*tdbb->getDefaultPool());
-		IDX_create_index(tdbb, IdxCreate::AtOnce, relation, &idx, work->getQualifiedName(),
-			&lttIndex->id, transaction, selectivity);
+
+		IDX_create_index(tdbb, creation, &lttIndex->id, selectivity);
 	}
 
 	// Update index on the current instance if it exists
@@ -4986,10 +4987,11 @@ static bool create_ltt_index(thread_db* tdbb, SSHORT phase, DeferredWork* work, 
 
 		if (relation->getPages(tdbb, 0, false))
 		{
+			IndexCreation creation(IdxCreate::AtOnce, relation, &idx, work->getQualifiedName(), transaction);
 			SelectivityList selectivity(*tdbb->getDefaultPool());
+
 			idx.idx_root = 0;
-			IDX_create_index(tdbb, IdxCreate::AtOnce, relation, &idx, work->getQualifiedName(),
-				&lttIndex->id, transaction, selectivity);
+			IDX_create_index(tdbb, creation, &lttIndex->id, selectivity);
 		}
 	}
 

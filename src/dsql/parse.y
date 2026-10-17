@@ -5239,12 +5239,11 @@ drop_behaviour
 alter_index_clause
 	: symbol_index_name index_active concurrently_opt
 		{
-			$$ = newNode<AlterIndexNode>(*$1, $2);
-			$$->concurrently = $3;
+			$$ = newNode<AlterIndexNode>(*$1, $2, $3);
 		}
 	| symbol_index_name VALIDATE UNIQUE
 		{
-			$$ = newNode<AlterIndexNode>(*$1, false);
+			$$ = newNode<AlterIndexNode>(*$1, false, false);
 			$$->validateUnique = true;
 		}
 	;

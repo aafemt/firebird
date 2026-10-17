@@ -13011,6 +13011,8 @@ void ModifyIndexNode::modify(thread_db* tdbb, jrd_tra* transaction)
 
 	if (!create)
 		step2(tdbb, transaction);
+	else if (deferredValidation)
+		validateUniqueIndex(tdbb, transaction, concurrently);
 }
 
 string ModifyIndexNode::print(Jrd::NodePrinter& printer) const
@@ -13077,7 +13079,7 @@ void ModifyIndexNode::validateUniqueIndex(thread_db* tdbb, jrd_tra* transaction,
 
 			fb_assert(IDX.RDB$UNIQUE_FLAG & IDX_UNIQUE);
 
-			if (!(IDX.RDB$UNIQUE_FLAG & IDX_NOT_VALIDATED))
+			if (!(IDX.RDB$UNIQUE_FLAG & IDX_NOT_VALIDATED) && !deferredValidation)
 				status_exception::raise(Arg::Gds(isc_dyn_index_already_validated));
 				// msg 330: "Index uniqueness already validated"
 
@@ -13086,12 +13088,44 @@ void ModifyIndexNode::validateUniqueIndex(thread_db* tdbb, jrd_tra* transaction,
 			QualifiedName relName(IDX.RDB$RELATION_NAME, IDX.RDB$SCHEMA_NAME);
 			jrd_rel* relation = MetadataCache::getVersioned<Cached::Relation>(tdbb, relName, CacheFlag::AUTOCREATE);
 
-			if (relation && IDX_validate_unique(tdbb, relation, idxId))
+			if (relation)
 			{
-				MODIFY IDX
-					IDX.RDB$UNIQUE_FLAG.NULL = FALSE;
-					IDX.RDB$UNIQUE_FLAG &= ~IDX_NOT_VALIDATED;
-				END_MODIFY
+				FbLocalStatus status;
+				bool valid = true;
+				{
+					AutoSetRestoreFlag flagPageSpace(&tdbb->tdbb_flags, TDBB_use_db_page_space, !relation->isTemporary());
+					try
+					{
+						IDX_validate_unique(tdbb, transaction, relation, idxId);
+					}
+					catch (const Exception& ex)
+					{
+						if (!silent)
+						{
+							if (create)
+								IDX_mark_index(tdbb, relation->getPermanent(), idxId);
+							throw;
+						}
+
+						ex.stuffException(&status);
+						valid = false;
+					}
+				}
+
+				const bool validated = !(IDX.RDB$UNIQUE_FLAG & IDX_NOT_VALIDATED);
+				if (valid != validated)
+				{
+					MODIFY IDX
+						IDX.RDB$UNIQUE_FLAG.NULL = FALSE;
+						if (valid)
+							IDX.RDB$UNIQUE_FLAG &= ~IDX_NOT_VALIDATED;
+						else
+							IDX.RDB$UNIQUE_FLAG |= IDX_NOT_VALIDATED;
+					END_MODIFY
+				}
+
+				if (!valid)
+					status.raise();
 			}
 		}
 		END_FOR
@@ -13177,6 +13211,7 @@ MetaId StoreIndexNode::create(thread_db* tdbb, jrd_tra* transaction)
 	}
 
 	index_desc idx;
+	MOVE_CLEAR(&idx, sizeof(index_desc));
 	idx.idx_count = 0;
 	int key_count = 0;
 
@@ -13185,6 +13220,7 @@ MetaId StoreIndexNode::create(thread_db* tdbb, jrd_tra* transaction)
 	Database* dbb = tdbb->getDatabase();
 	MetaId idxId = dbb->dbb_max_idx;
 	bool active = false;
+	bool havePartialSegments = false;
 	const bool tempConn = !(tdbb->tdbb_flags & TDBB_use_db_page_space);
 	auto* metaTransaction = tdbb->getAttachment()->getMetaTransaction(tdbb);
 
@@ -13351,13 +13387,14 @@ MetaId StoreIndexNode::create(thread_db* tdbb, jrd_tra* transaction)
 				collate = COLLATE_NONE;
 
 			const TTypeId text_type(CSetId(FLD.RDB$CHARACTER_SET_ID), collate);
-			idx.idx_rpt[SEG.RDB$FIELD_POSITION].idx_itype =
-				DFW_assign_index_type(tdbb, indexName, gds_cvt_blr_dtype[FLD.RDB$FIELD_TYPE], text_type);
+			auto& tail = idx.idx_rpt[SEG.RDB$FIELD_POSITION];
 
-			idx.idx_rpt[SEG.RDB$FIELD_POSITION].idx_length = SEG.RDB$CHARACTER_LENGTH;
+			tail.idx_itype = DFW_assign_index_type(tdbb, indexName, gds_cvt_blr_dtype[FLD.RDB$FIELD_TYPE], text_type);
+			tail.idx_length = SEG.RDB$CHARACTER_LENGTH;
+			havePartialSegments = (tail.idx_length != 0);
 
 			// Initialize selectivity to zero. Otherwise random rubbish makes its way into database
-			idx.idx_rpt[SEG.RDB$FIELD_POSITION].idx_selectivity = 0;
+			tail.idx_selectivity = 0;
 		}
 		END_FOR
 	}
@@ -13449,17 +13486,22 @@ MetaId StoreIndexNode::create(thread_db* tdbb, jrd_tra* transaction)
 
 		fb_assert(idxId <= dbb->dbb_max_idx);
 		idx.idx_id = idxId;
-		SelectivityList selectivity(*tdbb->getDefaultPool());
-		IDX_create_index(tdbb,
-			concurrently ? IdxCreate::Concurrently : IdxCreate::ForRollback,
-			relation, &idx, indexName, &idxId, transaction, selectivity);
 
+		IndexCreation creation(concurrently ? IdxCreate::Concurrently : IdxCreate::ForRollback,
+							   relation, &idx, indexName, transaction);
+		if ((idx.idx_flags & idx_unique) && (concurrently || havePartialSegments))
+		{
+			creation.checkDuplicates = IdxCheckDups::AfterBuild;
+			deferredValidation = true;
+		}
+
+		SelectivityList selectivity(*tdbb->getDefaultPool());
+
+		IDX_create_index(tdbb, creation, &idxId, selectivity);
 		fb_assert(idxId == idx.idx_id);
+
 		if (!tempConn)
 			DFW_update_index(indexName, idxId, selectivity, transaction, relation);
-
-		if (concurrently && (idx.idx_flags & idx_unique))
-			validateUniqueIndex(tdbb, transaction, true);
 	}
 	else
 		fb_assert(idxId == dbb->dbb_max_idx);
@@ -13631,6 +13673,15 @@ MetaId StoreIndexNode::createExpression(thread_db* tdbb, jrd_tra* transaction)
 			protectRelation.lock();
 		}
 
+		IndexCreation creation(concurrently ? IdxCreate::Concurrently : IdxCreate::ForRollback,
+			relation, & idx, indexName, transaction);
+
+		if ((idx.idx_flags & idx_unique) && concurrently)
+		{
+			creation.checkDuplicates = IdxCheckDups::AfterBuild;
+			deferredValidation = true;
+		}
+
 		SelectivityList selectivity(*tdbb->getDefaultPool());
 
 		AutoSave2<jrd_tra*, thread_db> currentTransaction(tdbb, &thread_db::getTransaction, &thread_db::setTransaction);
@@ -13640,10 +13691,8 @@ MetaId StoreIndexNode::createExpression(thread_db* tdbb, jrd_tra* transaction)
 		{
 			fb_assert(idxId <= dbb->dbb_max_idx);
 			idx.idx_id = idxId;
-			IDX_create_index(tdbb,
-				concurrently ? IdxCreate::Concurrently : IdxCreate::ForRollback,
-				relation, &idx, indexName, &idxId, transaction, selectivity);
 
+			IDX_create_index(tdbb, creation, &idxId, selectivity);
 			fb_assert(idxId == idx.idx_id);
 		}
 		catch (const Exception&)
@@ -13658,9 +13707,6 @@ MetaId StoreIndexNode::createExpression(thread_db* tdbb, jrd_tra* transaction)
 
 		if (!tempConn)
 			DFW_update_index(indexName, idx.idx_id, selectivity, transaction);
-
-		if (concurrently && (idx.idx_flags & idx_unique))
-			validateUniqueIndex(tdbb, transaction, true);
 	}
 	else
 		fb_assert(idxId == dbb->dbb_max_idx);
@@ -13742,11 +13788,6 @@ ModifyIndexNode* CreateIndexNode::store(thread_db* tdbb, MemoryPool& p, jrd_tra*
 		{
 			IDX.RDB$UNIQUE_FLAG.NULL = FALSE;
 			IDX.RDB$UNIQUE_FLAG = definition.unique.asBool() ? IDX_UNIQUE : 0;
-
-			if (definition.unique.asBool() && definition.concurrently.asBool())
-			{
-				IDX.RDB$UNIQUE_FLAG |= IDX_NOT_VALIDATED;
-			}
 		}
 
 		if (definition.inactive.isAssigned())
@@ -14212,11 +14253,11 @@ void CreateIndexNode::execute(thread_db* tdbb, DsqlCompilerScratch* dsqlScratch,
 	if (relation->dsqlName.package.isEmpty())
 		executeDdlTrigger(tdbb, dsqlScratch, transaction, DTW_AFTER, DDL_TRIGGER_CREATE_INDEX, name, {});
 
-	savePoint.release();	// everything is ok
-
 	ModifyIndexList oneItemList(*MemoryPool::getContextPool());
 	oneItemList.push(store(tdbb, oneItemList.getPool(), transaction, name, definition));
 	oneItemList.exec(tdbb, transaction);
+
+	savePoint.release();	// everything is ok
 }
 
 // Define an index on a Local Temporary Table.
@@ -14467,6 +14508,14 @@ bool AlterIndexNode::step1(thread_db* tdbb, DsqlCompilerScratch* dsqlScratch, jr
 				fb_assert(ret);
 			}
 
+			// When we going to activate unique index, there could be few cases:
+			// - re-activation is possible (see step2)
+			//	 - index was validated: no new validation necessary as index was maintained
+			//   - index was not validated : validation is required
+			// - re-activation is not possible, index will be build:
+			//   - validation is required and performed by rebuild procedure (storeNode.modify)
+			deferredValidation = create && idxId.has_value() && (IDX.RDB$UNIQUE_FLAG & IDX_NOT_VALIDATED);
+
 			MODIFY IDX
 				IDX.RDB$INDEX_INACTIVE.NULL = FALSE;
 				IDX.RDB$INDEX_INACTIVE = desiredStatus;
@@ -14474,6 +14523,12 @@ bool AlterIndexNode::step1(thread_db* tdbb, DsqlCompilerScratch* dsqlScratch, jr
 				{
 					IDX.RDB$STATISTICS.NULL = FALSE;
 					IDX.RDB$STATISTICS = -1.0;
+
+					if (IDX.RDB$UNIQUE_FLAG & IDX_UNIQUE)
+					{
+						IDX.RDB$UNIQUE_FLAG.NULL = FALSE;
+						IDX.RDB$UNIQUE_FLAG &= ~IDX_NOT_VALIDATED;
+					}
 				}
 			END_MODIFY
 		}
@@ -14514,6 +14569,12 @@ void AlterIndexNode::step2(thread_db* tdbb, jrd_tra* transaction)
 						IDX.RDB$STATISTICS.NULL = FALSE;
 						IDX.RDB$STATISTICS = 0.0;
 						IDX.RDB$INDEX_ID.NULL = TRUE;
+
+						if (IDX.RDB$UNIQUE_FLAG & IDX_UNIQUE)
+						{
+							IDX.RDB$UNIQUE_FLAG.NULL = FALSE;
+							IDX.RDB$UNIQUE_FLAG &= ~IDX_NOT_VALIDATED;
+						}
 					END_MODIFY
 				}
 				END_FOR
@@ -14527,6 +14588,7 @@ void AlterIndexNode::step2(thread_db* tdbb, jrd_tra* transaction)
 			StoreIndexNode storeNode(indexName, indexRelation, expressionIndex, concurrently);
 			fb_assert(indexRelation->getBasePages()->rel_index_root);
 			storeNode.step2(tdbb, transaction);
+			setDeferredValidationFrom(storeNode);
 			return;
 		}
 	}

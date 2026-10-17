@@ -1751,10 +1751,11 @@ static void store_indices(thread_db* tdbb, USHORT odsVersion)
 
 			idx.idx_count = index->ini_idx_segment_count;
 			idx.idx_flags = index->ini_idx_flags;
+
+			IndexCreation creation(IdxCreate::AtOnce, relVers, &idx, indexName, transaction);
 			SelectivityList selectivity(*tdbb->getDefaultPool());
 
-			IDX_create_index(tdbb, IdxCreate::AtOnce, relVers, &idx, indexName, NULL,
-				transaction, selectivity);
+			IDX_create_index(tdbb, creation, nullptr, selectivity);
 
 			X.RDB$INDEX_ID = idx.idx_id + 1;
 		}

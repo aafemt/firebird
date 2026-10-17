@@ -82,8 +82,6 @@ namespace
 {
 	constexpr unsigned MAX_LEVELS = 16;
 
-	constexpr MetaId SKIP_IN_PROGRESS = ~MetaId(0);
-
 	constexpr size_t OVERSIZE = (MAX_PAGE_SIZE + BTN_PAGE_SIZE + MAX_KEY + sizeof(SLONG) - 1) / sizeof(SLONG);
 
 	// END_LEVEL (~0) is choosen here as a unknown/none value, because it's
@@ -323,7 +321,7 @@ void dumpIndexRoot(...) { }
 }
 
 static bool checkIrtRepeat(thread_db* tdbb, const index_root_page::irt_repeat* irt_desc,
-	RelationPermanent* relation, WIN* window, MetaId indexId);
+	RelationPermanent* relation, WIN* window, bool skipInProgress);
 static ModifyIrtRepeatValue modifyIrtRepeat(thread_db* tdbb, index_root_page::irt_repeat* irt_desc,
 	RelationPermanent* relation, WIN* window, MetaId indexId, bool fromActivate = false);
 
@@ -1429,6 +1427,7 @@ bool BTR_delete_index(thread_db* tdbb, WIN* window, MetaId id, bool withCleanup)
 		delete_tree(tdbb, relation_id, id, next, prior);
 
 		// clear RDB$INDEX_ID and related stuff
+		// hvlad: should it be skipped if index instance is temporary?
 		if (withCleanup)
 			DropIndexNode::clearId(tdbb, relation_id, id);
 
@@ -2335,69 +2334,47 @@ USHORT BTR_key_length(thread_db* tdbb, jrd_rel* relation, index_desc* idx)
 	// hvlad: in ODS11 key of descending index can be prefixed with
 	//		  one byte value. See comments in compress
 	const SLONG prefix = (idx->idx_flags & idx_descending) ? 1 : 0;
-
 	const Format* format = relation->currentFormat(tdbb);
-	index_desc::idx_repeat* tail = idx->idx_rpt;
 
-	SLONG length;
-
-	// If there is only a single key, the computation is straightforward.
-	if (idx->idx_count == 1)
+	auto getSegmentLength = [&](const index_desc::idx_repeat* tail, const dsc* desc) -> SLONG
 	{
 		switch (tail->idx_itype)
 		{
 		case idx_numeric:
-			length = sizeof(double);
-			break;
+			return sizeof(double);
 
 		case idx_sql_time:
 		case idx_sql_time_tz:
-			length = sizeof(ULONG);
-			break;
+			return sizeof(ULONG);
 
 		case idx_sql_date:
-			length = sizeof(SLONG);
-			break;
+			return sizeof(SLONG);
 
 		case idx_timestamp:
 		case idx_timestamp_tz:
-			length = sizeof(SINT64);
-			break;
+			return sizeof(SINT64);
 
 		case idx_numeric2:
-			length = INT64_KEY_LENGTH;
-			break;
+			return INT64_KEY_LENGTH;
 
 		case idx_boolean:
-			length = sizeof(UCHAR);
-			break;
+			return sizeof(UCHAR);
 
 		case idx_decimal:
-			length = Decimal128::getIndexKeyLength();
-			break;
+			return Decimal128::getIndexKeyLength();
 
 		case idx_bcd:
-			length = Int128::getIndexKeyLength();
-			break;
+			return Int128::getIndexKeyLength();
 
 		default:
-			if (idx->idx_flags & idx_expression)
 			{
-				fb_assert(idx->idx_expression_node);
-				length = idx->idx_expression_desc.dsc_length;
-				if (idx->idx_expression_desc.dsc_dtype == dtype_varying)
+				SLONG length;
+
+				if (tail->idx_length == 0)
 				{
-					length = length - sizeof(SSHORT);
-				}
-			}
-			else
-			{
-				if (!tail->idx_length)
-				{
-					length = format->fmt_desc[tail->idx_field].dsc_length;
-					if (format->fmt_desc[tail->idx_field].dsc_dtype == dtype_varying) {
-						length = length - sizeof(SSHORT);
-					}
+					length = desc->dsc_length;
+					if (desc->dsc_dtype == dtype_varying)
+						length -= sizeof(SSHORT);
 				}
 				else if (tail->idx_itype == idx_metadata)
 				{
@@ -2409,13 +2386,33 @@ USHORT BTR_key_length(thread_db* tdbb, jrd_rel* relation, index_desc* idx)
 					const auto tt = INTL_texttype_lookup(tdbb, INTL_INDEX_TO_TEXT(tail->idx_itype));
 					length = tail->idx_length * tt->getCharSet()->maxBytesPerChar();
 				}
-			}
+				else
+				{
+					fb_assert(tail->idx_itype == idx_string || tail->idx_itype == idx_byte_array);
+					length = tail->idx_length;
+				}
 
-			if (tail->idx_itype >= idx_first_intl_string) {
-				length = INTL_key_length(tdbb, tail->idx_itype, length);
+				if (tail->idx_itype >= idx_first_intl_string)
+					length = INTL_key_length(tdbb, tail->idx_itype, length);
+
+				return length;
 			}
-			break;
 		}
+	};
+
+	index_desc::idx_repeat* tail = idx->idx_rpt;
+	SLONG length;
+
+	// If there is only a single key, the computation is straightforward.
+	if (idx->idx_count == 1)
+	{
+		if (idx->idx_flags & idx_expression)
+		{
+			fb_assert(idx->idx_expression_node);
+			length = getSegmentLength(tail, &idx->idx_expression_desc);
+		}
+		else
+			length = getSegmentLength(tail, &format->fmt_desc[tail->idx_field]);
 
 		return length + prefix;
 	}
@@ -2425,56 +2422,7 @@ USHORT BTR_key_length(thread_db* tdbb, jrd_rel* relation, index_desc* idx)
 
 	for (USHORT n = 0; n < idx->idx_count; n++, tail++)
 	{
-		switch (tail->idx_itype)
-		{
-		case idx_numeric:
-			length = sizeof(double);
-			break;
-		case idx_sql_time:
-		case idx_sql_time_tz:
-			length = sizeof(ULONG);
-			break;
-		case idx_sql_date:
-			length = sizeof(ULONG);
-			break;
-		case idx_timestamp:
-		case idx_timestamp_tz:
-			length = sizeof(SINT64);
-			break;
-		case idx_numeric2:
-			length = INT64_KEY_LENGTH;
-			break;
-		case idx_boolean:
-			length = sizeof(UCHAR);
-			break;
-		case idx_decimal:
-			length = Decimal128::getIndexKeyLength();
-			break;
-		case idx_bcd:
-			length = Int128::getIndexKeyLength();
-			break;
-		default:
-			if (!tail->idx_length)
-			{
-				length = format->fmt_desc[tail->idx_field].dsc_length;
-				if (format->fmt_desc[tail->idx_field].dsc_dtype == dtype_varying)
-					length -= sizeof(SSHORT);
-			}
-			else if (tail->idx_itype == idx_metadata)
-			{
-				const auto cs = INTL_charset_lookup(tdbb, CS_METADATA);
-				length = tail->idx_length * cs->maxBytesPerChar();
-			}
-			else if (tail->idx_itype >= idx_first_intl_string)
-			{
-				const auto tt = INTL_texttype_lookup(tdbb, INTL_INDEX_TO_TEXT(tail->idx_itype));
-				length = tail->idx_length * tt->getCharSet()->maxBytesPerChar();
-			}
-
-			if (tail->idx_itype >= idx_first_intl_string)
-				length = INTL_key_length(tdbb, tail->idx_itype, length);
-			break;
-		}
+		length = getSegmentLength(tail, &format->fmt_desc[tail->idx_field]);
 
 		key_length += ((length + prefix + STUFF_COUNT - 1) / STUFF_COUNT) * (STUFF_COUNT + 1);
 	}
@@ -2936,9 +2884,11 @@ void BTR_merge_index(thread_db* tdbb, jrd_tra* transaction, jrd_rel* relation, i
 
 // checks is there a need to modify index descriptor
 // if yes - we release index root window
+// window is released if function returns true and skipInProgress == false
+// if skipInProgress == true, window is not released
 
 static bool checkIrtRepeat(thread_db* tdbb, const index_root_page::irt_repeat* irt_desc,
-	RelationPermanent* relation, WIN* window, MetaId indexId)
+	RelationPermanent* relation, WIN* window, bool skipInProgress)
 {
 	const TraNumber irtTrans = irt_desc->getTransaction();
 	const TraNumber oldestActive = tdbb->getDatabase()->dbb_oldest_active;
@@ -2952,7 +2902,7 @@ static bool checkIrtRepeat(thread_db* tdbb, const index_root_page::irt_repeat* i
 
 	case irt_in_progress:
 	case irt_concurrently:
-		if (indexId == SKIP_IN_PROGRESS)
+		if (skipInProgress)
 			return false;
 
 		// index creation - check transaction state to know what to do
@@ -2978,7 +2928,7 @@ static bool checkIrtRepeat(thread_db* tdbb, const index_root_page::irt_repeat* i
 		default:
 			return false;
 		}
-		if (indexId != SKIP_IN_PROGRESS)
+		if (!skipInProgress)
 			CCH_RELEASE(tdbb, window);
 		break;
 
@@ -2986,7 +2936,7 @@ static bool checkIrtRepeat(thread_db* tdbb, const index_root_page::irt_repeat* i
 		// drop index when OAT >= irtTrans
 		if (oldestActive < irtTrans)
 			return false;
-		if (indexId != SKIP_IN_PROGRESS)
+		if (!skipInProgress)
 			CCH_RELEASE(tdbb, window);
 		break;
 
@@ -3022,7 +2972,8 @@ static ModifyIrtRepeatValue modifyIrtRepeat(thread_db* tdbb, index_root_page::ir
 		CCH_RELEASE(tdbb, window);
 		{
 			auto transaction = tdbb->getTransaction();
-			const auto state = transaction && (transaction->tra_number == irtTrans) ? tra_active :
+			const auto state = transaction && (transaction->tra_number == irtTrans) ?
+				(fromActivate ? tra_us : tra_active) :
 				TRA_wait(tdbb, transaction, irtTrans, tra_probe);
 
 			auto root = (index_root_page*) CCH_FETCH(tdbb, window, LCK_write, pag_root);
@@ -3150,7 +3101,7 @@ bool BTR_next_index(thread_db* tdbb, Cached::Relation* relation, jrd_tra* transa
 		{
 			const index_root_page::irt_repeat* irt_desc = root->irt_rpt + id;
 
-			if (checkIrtRepeat(tdbb, irt_desc, relation, window, id))
+			if (checkIrtRepeat(tdbb, irt_desc, relation, window, false))
 			{
 				auto* root_write = BTR_fetch_root_for_update(FB_FUNCTION, tdbb, window);
 				auto* irt_write = root_write->irt_rpt + id;
@@ -3214,7 +3165,7 @@ bool BTR_cleanup_index(thread_db* tdbb, const QualifiedName& relName, jrd_tra* t
 
 	const index_root_page::irt_repeat* irt_desc = root->irt_rpt + id;
 	bool rc = false;
-	if (checkIrtRepeat(tdbb, irt_desc, relation, &window, id))
+	if (checkIrtRepeat(tdbb, irt_desc, relation, &window, false))
 	{
 		auto* root_write = BTR_fetch_root_for_update(FB_FUNCTION, tdbb, &window);
 		auto* irt_write = root_write->irt_rpt + id;
@@ -3408,16 +3359,25 @@ void BTR_reserve_slot(thread_db* tdbb, IndexCreation& creation)
 
 		for (MetaId id = 0; id < root->irt_count; ++id)
 		{
-			index_root_page::irt_repeat* root_idx = &root->irt_rpt[id];
+			index_root_page::irt_repeat* root_idx = root->irt_rpt + id;
 			if (root_idx->isUsed())
 			{
-				if (checkIrtRepeat(tdbb, root_idx, rel, &window, retry == 1 ? id : SKIP_IN_PROGRESS))
+				const bool skipInProgress = (idx->idx_id == id && use_idx_id) ? false : (retry != 1);
+
+				if (checkIrtRepeat(tdbb, root_idx, rel, &window, skipInProgress))
 				{
+					if (!skipInProgress)
+					{
+						root = BTR_fetch_root_for_update(FB_FUNCTION, tdbb, &window);
+						root_idx = root->irt_rpt + id;
+					}
 					fb_assert(window.win_bdb);
 
 					switch(modifyIrtRepeat(tdbb, root_idx, rel, &window, id))
 					{
 					case ModifyIrtRepeatValue::Skip:
+						CCH_MARK(tdbb, &window);
+						[[fallthrough]];
 					case ModifyIrtRepeatValue::Modified:
 						fb_assert(window.win_bdb);
 						// buffer could be released and refetched by modifyIrtRepeat
@@ -3429,10 +3389,12 @@ void BTR_reserve_slot(thread_db* tdbb, IndexCreation& creation)
 					case ModifyIrtRepeatValue::Deleted:
 						root = BTR_fetch_root_for_update(FB_FUNCTION, tdbb, &window);
 						fb_assert(window.win_bdb);
-						root_idx = &root->irt_rpt[id];
+						root_idx = root->irt_rpt + id;
+						CCH_MARK(tdbb, &window);
 						break;
 					}
 				}
+				fb_assert(window.win_bdb);
 			}
 
 			if (root_idx->isUsed())
@@ -5256,7 +5218,8 @@ static ULONG fast_load(thread_db* tdbb,
 			if (duplicate && (count > 1))
 			{
 				++duplicates;
-				if (unique && primarySeen && isPrimary && !(isr->isr_flags & ISR_null) && !creation.isConcurrently())
+				if (unique && primarySeen && isPrimary && !(isr->isr_flags & ISR_null) &&
+					(creation.checkDuplicates == IdxCheckDups::WhenBuild))
 				{
 					++creation.duplicates;
 					creation.dup_recno = isr->isr_record_number;
@@ -5640,7 +5603,17 @@ static ULONG fast_load(thread_db* tdbb,
 			ERR_punt();
 
 		if (!relation->isTemporary())
+		{
 			CCH_flush(tdbb, FLUSH_ALL, 0);
+		}
+		else if (window->win_page.getPageSpaceID() == DB_PAGE_SPACE)
+		{
+			// Write the root page only to avoid possible circle in dependencies.
+			// Note, this is the only page in tree.
+			CCH_FETCH(tdbb, window, LCK_EX, pag_index);
+			CCH_MARK_MUST_WRITE(tdbb, window);
+			CCH_RELEASE(tdbb, window);
+		}
 
 		// Calculate selectivity, also per segment when newer ODS
 		selectivity.grow(segments);
