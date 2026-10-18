@@ -1046,7 +1046,6 @@ RecordSource* Optimizer::compile(BoolExprNodeStack* parentStack)
 					// dependent rivers from hashing or sort/merging that happens below.
 
 					rivers.add(FB_NEW_POOL(getPool()) CrossJoin(this, rivers, JoinType::INNER));
-					rivers.back()->activate(csb);
 				}
 
 				// Now process streams dependent on rivers that are dependent themselves
@@ -1303,9 +1302,10 @@ void Optimizer::compileRelation(StreamType stream)
 
 	if (needIndices && !relation()->getExtFile() && !relation()->isVirtual())
 	{
-		const auto relPages = relation()->getPages(tdbb);
+		const auto relPages = relation(tdbb)->getPages(tdbb);
+
 		IndexDescList idxList;
-		BTR_all(tdbb, relation(), idxList, relPages, csb->csb_g_flags & csb_internal);
+		BTR_all(tdbb, relation(tdbb), idxList, csb->csb_g_flags & csb_internal);
 
 		MetaId n = idxList.getCount();
 		while (n--)
@@ -1332,7 +1332,7 @@ void Optimizer::compileRelation(StreamType stream)
 				if (idx.idx_selectivity <= 0.0f)
 				{
 					SelectivityList	selectivity;
-					BTR_selectivity(tdbb, relation(), idx.idx_id, selectivity);
+					BTR_selectivity(tdbb, relation(tdbb), idx.idx_id, selectivity);
 					if (selectivity[0] > 0.0f)
 						updated = true;
 				}
@@ -1341,7 +1341,7 @@ void Optimizer::compileRelation(StreamType stream)
 			if (updated)
 			{
 				idxList.clear();
-				BTR_all(tdbb, relation(), idxList, relPages, csb->csb_g_flags & csb_internal);
+				BTR_all(tdbb, relation(tdbb), idxList, csb->csb_g_flags & csb_internal);
 			}
 		}
 

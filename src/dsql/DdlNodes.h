@@ -1345,7 +1345,8 @@ public:
 			  fieldSource(p),
 			  identitySequence(p),
 			  defaultSource(p),
-			  baseField(p)
+			  baseField(p),
+			  tableSpace(p)
 		{
 		}
 
@@ -1365,6 +1366,7 @@ public:
 		Firebird::ByteChunk defaultValue;
 		std::optional<USHORT> viewContext;
 		MetaName baseField;
+		MetaName tableSpace;
 	};
 
 	struct IndexConstraintClause
@@ -1419,7 +1421,8 @@ public:
 			  refUpdateAction(RI_RESTRICT),
 			  refDeleteAction(RI_RESTRICT),
 			  triggers(p),
-			  blrWritersHolder(p)
+			  blrWritersHolder(p),
+			  tableSpace(p)
 		{
 		}
 
@@ -1432,6 +1435,7 @@ public:
 		const char* refDeleteAction;
 		Firebird::ObjectsArray<TriggerDefinition> triggers;
 		Firebird::ObjectsArray<BlrWriter> blrWritersHolder;
+		MetaName tableSpace;
 	};
 
 	struct CreateDropConstraint
@@ -1460,7 +1464,9 @@ public:
 			TYPE_DROP_CONSTRAINT,
 			TYPE_ALTER_SQL_SECURITY,
 			TYPE_ALTER_PUBLICATION,
-			TYPE_ADD_INLINE_TABLE_INDEX
+			TYPE_ADD_PACKAGED_TABLE_INDEX,
+			TYPE_ADD_INLINE_TABLE_INDEX,
+			TYPE_SET_TABLESPACE
 		};
 
 		explicit Clause(MemoryPool& p, Type aType) noexcept
@@ -1519,7 +1525,8 @@ public:
 			  refRelation(p),
 			  refColumns(p),
 			  refAction(NULL),
-			  check(NULL)
+			  check(NULL),
+			  tableSpace(p)
 		{
 		}
 
@@ -1532,6 +1539,7 @@ public:
 		NestConst<RefActionClause> refAction;
 		NestConst<BoolSourceClause> check;
 		bool createIfNotExistsOnly = false;
+		MetaName tableSpace;
 	};
 
 	struct IdentityOptions
@@ -1753,6 +1761,7 @@ public:
 	std::optional<ULONG> tempRowsFlag;	// REL_temp_tran, REL_temp_conn
 	Firebird::TriState ssDefiner;
 	Firebird::TriState replicationState;
+	MetaName tableSpace;
 	ModifyIndexList indexList;
 };
 
@@ -1974,19 +1983,21 @@ public:
 class ModifyIndexNode
 {
 public:
-	ModifyIndexNode(const QualifiedName& indexName, Cached::Relation* rel, bool create, bool expression, bool concurrently)
+	enum OP { OP_ACTIVE, OP_INACTIVE, OP_VALIDATE_UNIQUE, OP_SET_TABLESPACE };
+
+	ModifyIndexNode(const QualifiedName& indexName, Cached::Relation* rel, OP op, bool expression, bool concurrently)
 		: indexName(indexName),
 		  indexRelation(rel),
-		  create(create),
+		  operation(op),
 		  expressionIndex(expression),
 		  concurrently(concurrently)
 	{
 		fb_assert(indexRelation);
 	}
 
-	ModifyIndexNode(const QualifiedName& indexName, bool create, bool expression, bool concurrently)
+	ModifyIndexNode(const QualifiedName& indexName, OP op, bool expression, bool concurrently)
 		: indexName(indexName),
-		  create(create),
+		  operation(op),
 		  expressionIndex(expression),
 		  concurrently(concurrently)
 	{
@@ -2001,7 +2012,7 @@ public:
 
 	bool check(thread_db*, MetaName iName)
 	{
-		return create && (indexName.object == iName);
+		return (operation == OP_ACTIVE) && (indexName.object == iName);
 	}
 
 	Cached::Relation* getRelation() const
@@ -2023,10 +2034,13 @@ protected:
 
 	QualifiedName indexName;
 	Cached::Relation* indexRelation = nullptr;
-	bool create;
+	const OP operation;
 	bool expressionIndex;
 	bool deferredValidation = false;
 	bool concurrently;
+
+public:
+	MetaName tableSpace;
 };
 
 
@@ -2079,6 +2093,7 @@ public:
 		bid conditionSource;
 		QualifiedName refRelation;
 		Firebird::ObjectsArray<MetaName> refColumns;
+		MetaName tableSpace;
 	};
 
 public:
@@ -2123,6 +2138,7 @@ public:
 	NestConst<ValueSourceClause> computed;
 	NestConst<BoolSourceClause> partial;
 	bool createIfNotExistsOnly = false;
+	MetaName tableSpace;
 };
 
 
@@ -2130,7 +2146,7 @@ class StoreIndexNode final : public ModifyIndexNode
 {
 public:
 	StoreIndexNode(const QualifiedName& indexName, Cached::Relation* rel, bool expressionIndex, bool concurrently)
-		: ModifyIndexNode(indexName, rel, true, expressionIndex, concurrently)
+		: ModifyIndexNode(indexName, rel, OP_ACTIVE, expressionIndex, concurrently)
 	{ }
 
 public:
@@ -2145,8 +2161,8 @@ private:
 class AlterIndexNode final : public ModifyIndexNode, public DdlNode
 {
 public:
-	AlterIndexNode(MemoryPool& p, const QualifiedName& name, bool active, bool concurrently)
-		: ModifyIndexNode(name, active, false, concurrently),
+	AlterIndexNode(MemoryPool& p, const QualifiedName& name, OP op, bool concurrently)
+		: ModifyIndexNode(name, op, false, concurrently),
 		  DdlNode(p)
 	{
 	}
@@ -2184,9 +2200,6 @@ protected:
 	}
 
 	std::optional<MetaId> idxId;
-
-public:
-	bool validateUnique = false;
 };
 
 
@@ -2237,7 +2250,7 @@ class DropIndexNode final : public ModifyIndexNode, public DdlNode
 {
 public:
 	DropIndexNode(MemoryPool& p, const QualifiedName& name)
-		: ModifyIndexNode(name, false, false, false),
+		: ModifyIndexNode(name, OP_INACTIVE, false, false),
 		  DdlNode(p)
 	{ }
 
