@@ -556,7 +556,10 @@ inline std::optional<Jrd::PageNumber> index_root_page::irt_repeat::getRootPage()
 inline void index_root_page::irt_repeat::setRootPage(const Jrd::PageNumber& rootPage)
 {
 	// hvlad: is irt_in_progress possible here ?
-	fb_assert(getState() == irt_in_progress || getState() == irt_normal || getState() == irt_concurrently);
+	fb_assert(getState() == irt_in_progress ||
+			  getState() == irt_rollback ||
+			  getState() == irt_normal ||
+			  getState() == irt_concurrently);
 
 	fb_assert(rootPage.getPageNum());
 	irt_page_num = rootPage.getPageNum();
