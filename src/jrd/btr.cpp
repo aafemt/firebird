@@ -719,24 +719,9 @@ idx_e IndexKey::compose(Record* record, bool skipNewFormat)
 	// Note that compound keys are expanded by 25%.
 	// If this changes, both BTR_key_length and GDEF exe.e have to change.
 
-	const auto dbb = m_tdbb->getDatabase();
-	const auto maxKeyLength = dbb->getMaxIndexKeyLength();
-	constexpr auto indexDropStates = (1 << Ods::irt_drop) | (1 << Ods::irt_commit);
-
-	temporary_key temp;
-	temp.key_flags = 0;
-	temp.key_length = 0;
-
-	dsc desc;
-	dsc* desc_ptr;
-
 	auto tail = m_index->idx_rpt;
-	m_key.key_flags = 0;
-	m_key.key_nulls = 0;
 
-	const bool descending = (m_index->idx_flags & idx_descending);
-
-	if ((indexDropStates & (1 << m_index->idx_state)) && skipNewFormat)
+	if ((m_index->idx_state == Ods::irt_drop) && skipNewFormat)
 	{
 		// Treat expression/condition BLR as black boxes now.
 		// May be later using dependencies...
@@ -748,23 +733,37 @@ idx_e IndexKey::compose(Record* record, bool skipNewFormat)
 			return idx_e_skip;
 		auto& desc = format->fmt_desc;
 
-		auto* tdbb = JRD_get_thread_data();
-
 		for (USHORT n = 0; n < m_index->idx_count; ++n)
 		{
-			if (n >= desc.getCount())
+			const auto fldNum = tail[n].idx_field;
+			if (fldNum >= desc.getCount())
 				return idx_e_skip;
 
-			auto& dsc = desc[n];
+			auto& dsc = desc[fldNum];
 			if (dsc.dsc_dtype == dtype_unknown)
 				return idx_e_skip;
 
-			auto iType = DFW_assign_index_type(tdbb, QualifiedName("index for composed key"),
+			auto iType = DFW_assign_index_type(m_tdbb, QualifiedName("index for composed key"),
 				dsc.dsc_dtype, dsc.isText() ? dsc.getTextType() : ttype_none);
 			if (tail[n].idx_itype != iType)
 				return idx_e_skip;
 		}
 	}
+
+	const auto dbb = m_tdbb->getDatabase();
+	const auto maxKeyLength = dbb->getMaxIndexKeyLength();
+
+	m_key.key_flags = 0;
+	m_key.key_nulls = 0;
+
+	temporary_key temp;
+	temp.key_flags = 0;
+	temp.key_length = 0;
+
+	dsc desc;
+	dsc* desc_ptr;
+
+	const bool descending = (m_index->idx_flags & idx_descending);
 
 	try
 	{
