@@ -1384,8 +1384,6 @@ public:
 		return scan(tdbb, flags);
 	}
 
-	RelationPages* getPages(thread_db* tdbb, RelationPages::InstanceId instanceId = MAX_TRA_NUMBER, bool allocPages = true);
-
 	RelationPages* getBasePages() noexcept
 	{
 		if (!m_basePages || m_basePages->getPageSpaceId() != m_pageSpaceId)
@@ -1393,6 +1391,16 @@ public:
 
 		fb_assert(m_basePages);
 		return m_basePages;
+	}
+
+	RelationPages* getBasePages(thread_db* tdbb);
+
+	RelationPages* getPages(thread_db* tdbb, RelationPages::InstanceId instanceId = MAX_TRA_NUMBER,
+							bool allocPages = true)
+	{
+		return rel_perm->useTempPages(tdbb) ?
+			rel_perm->getTempPages(tdbb, instanceId, allocPages) :
+			getBasePages(tdbb);
 	}
 
 	void deletePages(thread_db* tdbb);

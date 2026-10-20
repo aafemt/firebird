@@ -10925,12 +10925,12 @@ void AlterRelationNode::execute(thread_db* tdbb, DsqlCompilerScratch* dsqlScratc
 
 		if (pageSpaceId)
 		{
-			const auto orgPages = rel->getBasePages();
+			const auto orgPages = rel->getBasePages(tdbb);
 
 			const auto newVersion = newRel->getVersioned(tdbb, CacheFlag::NOCOMMIT);
 			fb_assert(newVersion);
 
-			const auto newPages = newVersion->getBasePages();
+			const auto newPages = newVersion->getBasePages(tdbb);
 
 			fb_assert(newPages->getPageSpaceId() == pageSpaceId.value());
 			fb_assert(newPages->getPageSpaceId() != orgPages->getPageSpaceId());
@@ -12180,7 +12180,7 @@ void DropRelationNode::execute(thread_db* tdbb, DsqlCompilerScratch* dsqlScratch
 		if (dbb->dbb_garbage_collector)
 			dbb->dbb_garbage_collector->removeRelation(relPerm->getId());
 
-		const auto relPages = relation->getBasePages();
+		const auto relPages = relation->getBasePages(tdbb);
 
 		if (relPages->hasData())
 			DPM_mark_relation(tdbb, relation);

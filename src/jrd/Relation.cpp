@@ -560,7 +560,7 @@ RelationPages* RelationPermanent::getTempPages(thread_db* tdbb, RelationPages::I
 		const auto relation = MetadataCache::getVersioned<Cached::Relation>(tdbb, getId(), CacheFlag::AUTOCREATE);
 		fb_assert(relation);
 
-		const auto basePages = relation->getBasePages();
+		const auto basePages = relation->getBasePages(tdbb);
 
 		WIN window(basePages->getPageSpaceId());
 		index_desc idx;
@@ -941,7 +941,7 @@ void jrd_rel::releaseTriggers(thread_db* tdbb, bool destroy)
 		rel_triggers[n].release(tdbb, destroy);
 }
 
-RelationPages* jrd_rel::getPages(thread_db* tdbb, RelationPages::InstanceId instanceId, bool allocPages)
+RelationPages* jrd_rel::getBasePages(thread_db* tdbb)
 {
 	const auto relPages = getBasePages();
 
@@ -950,12 +950,12 @@ RelationPages* jrd_rel::getPages(thread_db* tdbb, RelationPages::InstanceId inst
 
 	Tablespace::lock(tdbb, relPages->getPageSpaceId());
 
-	return rel_perm->useTempPages(tdbb) ? rel_perm->getTempPages(tdbb, instanceId, allocPages) : relPages;
+	return relPages;
 }
 
 void jrd_rel::deletePages(thread_db* tdbb)
 {
-	DPM_delete_relation(tdbb, rel_perm, getBasePages());
+	DPM_delete_relation(tdbb, rel_perm, getBasePages(tdbb));
 }
 
 const char* jrd_rel::objectFamily(RelationPermanent* perm)

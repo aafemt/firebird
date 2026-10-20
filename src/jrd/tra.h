@@ -432,6 +432,11 @@ public:
 		return tra_gen_ids;
 	}
 
+	bool isTablespaceLocked(ULONG pageSpaceId) const
+	{
+		return tra_tablespaces.exist(pageSpaceId);
+	}
+
 	void lockTablespace(thread_db* tdbb, ULONG pageSpaceId)
 	{
 		tra_tablespaces.add(tdbb, pageSpaceId);
