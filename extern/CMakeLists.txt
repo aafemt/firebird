@@ -167,7 +167,8 @@ set(LIB_tomcrypt ${LIB_tomcrypt} PARENT_SCOPE)
 # if (WITH_LIBTOM_STATIC)
 
     file(GLOB_RECURSE libtomcrypt_src 
-    "libtomcrypt/src/*"
+    "libtomcrypt/src/*.c"
+    "libtomcrypt/src/*.h"
     )
 
     list(FILTER libtomcrypt_src EXCLUDE REGEX ".*aes_tab.c")
