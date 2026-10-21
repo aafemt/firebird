@@ -489,7 +489,7 @@ file(GLOB engine_src
     "remote/os/${OS_DIR}/*.cpp"
     "remote/*.cpp"
     "remote/client/*.cpp"
-    "common/classes/ThreadCleanup.cpp"
+    "common/classes/ThreadCleanupCallback.cpp"
 )
 set(engine_src ${engine_src}
     lock/lock.cpp
