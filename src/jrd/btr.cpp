@@ -1051,6 +1051,12 @@ bool IndexDuplicateScanner::find(thread_db* tdbb, RecordBitmap& recs)
 			if (node.isEndBucket || node.isEndLevel)
 				break;
 
+			if (currentKey + node.prefix + node.length > m_key.end())
+			{
+				CCH_RELEASE(tdbb, &window);
+				BUGCHECK(204);		// msg 204 index inconsistent
+			}
+
 			if (!node.length && !node.prefix && !descending)  // all nulls key
 				continue;
 
