@@ -1051,6 +1051,12 @@ bool IndexDuplicateScanner::find(thread_db* tdbb, RecordBitmap& recs)
 			if (node.isEndBucket || node.isEndLevel)
 				break;
 
+			if (currentKey + node.prefix + node.length > m_key.end())
+			{
+				CCH_RELEASE(tdbb, &window);
+				BUGCHECK(204);		// msg 204 index inconsistent
+			}
+
 			if (!node.length && !node.prefix && !descending)  // all nulls key
 				continue;
 
@@ -1081,9 +1087,6 @@ bool IndexDuplicateScanner::find(thread_db* tdbb, RecordBitmap& recs)
 					return true;
 				}
 			}
-
-			if (currentKey + node.prefix + node.length > m_key.end())
-				BUGCHECK(204);		// msg 204 index inconsistent
 
 			m_keyLength = node.length + node.prefix;
 			memcpy(currentKey + node.prefix, node.data, node.length);
