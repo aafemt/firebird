@@ -1082,7 +1082,7 @@ bool IndexDuplicateScanner::find(thread_db* tdbb, RecordBitmap& recs)
 				}
 			}
 
-			if (!node.keyFits(m_key.getCount()))
+			if (currentKey + node.prefix + node.length > m_key.end())
 				BUGCHECK(204);		// msg 204 index inconsistent
 
 			m_keyLength = node.length + node.prefix;
