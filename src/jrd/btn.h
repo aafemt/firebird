@@ -77,6 +77,13 @@ struct IndexNode
 		return !memcmp(this->data, data + this->prefix, this->length);
 	}
 
+	// Check if the key expanded from this node (prefix + length) fits
+	// into a buffer of the given size
+	bool keyFits(USHORT size) const
+	{
+		return prefix <= size && length <= size - prefix;
+	}
+
 	void setEndBucket()
 	{
 		this->isEndBucket = true;

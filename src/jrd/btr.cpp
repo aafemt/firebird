@@ -1082,6 +1082,9 @@ bool IndexDuplicateScanner::find(thread_db* tdbb, RecordBitmap& recs)
 				}
 			}
 
+			if (!node.keyFits(m_key.getCount()))
+				BUGCHECK(204);		// msg 204 index inconsistent
+
 			m_keyLength = node.length + node.prefix;
 			memcpy(currentKey + node.prefix, node.data, node.length);
 			prevRecno = node.recordNumber.getValue();
