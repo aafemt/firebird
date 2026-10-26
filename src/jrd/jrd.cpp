@@ -1893,6 +1893,12 @@ JAttachment* JProvider::internalAttach(CheckStatusWrapper* user_status, const ch
 					ERR_post(Arg::Gds(isc_no_user_att_while_restore));
 			}
 
+			if (newDb)
+				INI_init_sys_relations(tdbb);
+
+			// Basic DBB initialization complete
+			initGuard.leave();
+
 			// Attachments to a ReadOnly database need NOT do garbage collection
 			if (dbb->readOnly())
 				attachment->att_flags |= ATT_no_cleanup;
@@ -1913,12 +1919,6 @@ JAttachment* JProvider::internalAttach(CheckStatusWrapper* user_status, const ch
 			}
 
 			PAG_attachment_id(tdbb);
-
-			if (newDb)
-				INI_init_sys_relations(tdbb);
-
-			// Basic DBB initialization complete
-			initGuard.leave();
 
 			bool cleanupTransactions = false;
 
