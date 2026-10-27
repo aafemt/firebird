@@ -1119,6 +1119,14 @@ void INI_init(thread_db* tdbb)
 		relVers->rel_current_fmt = currentFormat;
 		relVers->rel_current_format = formats->value(currentFormat);
 	}
+
+	if (dbb->dbb_rdb_pages)
+	{
+		const auto relation = MetadataCache::getVersioned<Cached::Relation>(tdbb, rel_pages, CacheFlag::AUTOCREATE | CacheFlag::NOSCAN);
+		const auto relPages = relation->getBasePages();
+		fb_assert(!relPages->hasData());
+		relPages->init(dbb->dbb_rdb_pages);
+	}
 }
 
 
