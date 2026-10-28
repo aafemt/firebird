@@ -1,0 +1,20 @@
+create or alter view PUBLIC.RDB$VIEW_RELATIONS as
+with SEARCH_PATH as (
+  select row_number() over() as PRIO, NAME as SCHEMA_NAME
+  from SYSTEM.RDB$SQL.PARSE_UNQUALIFIED_NAMES(rdb$get_context('SYSTEM', 'SEARCH_PATH'))
+),
+VIEW_RELATIONS As (
+  Select distinct
+    first_value(RDB$VIEW_NAME) over Win as VIEW_NAME,
+    first_value(RDB$SCHEMA_NAME) over Win as SCHEMA_NAME
+  from SYSTEM.RDB$VIEW_RELATIONS v
+    join SEARCH_PATH p on p.SCHEMA_NAME = v.RDB$SCHEMA_NAME
+  Window Win As (partition by v.RDB$VIEW_NAME order by p.PRIO)
+)
+SELECT a.RDB$VIEW_NAME, a.RDB$RELATION_NAME, a.RDB$VIEW_CONTEXT,
+    a.RDB$CONTEXT_NAME, a.RDB$CONTEXT_TYPE, a.RDB$PACKAGE_NAME
+FROM SYSTEM.RDB$VIEW_RELATIONS a join VIEW_RELATIONS
+  on a.RDB$VIEW_NAME=VIEW_NAME and
+     a.RDB$SCHEMA_NAME=SCHEMA_NAME;
+
+grant SELECT on table PUBLIC.RDB$VIEW_RELATIONS to PUBLIC;
